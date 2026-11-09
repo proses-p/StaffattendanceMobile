@@ -118,6 +118,30 @@ class ApiService {
     return data;
   }
 
+  Future<void> recoverSyncSigningKey(String currentPassword) async {
+    final security = DeviceSecurityService();
+    final deviceUuid = await security.deviceUuid();
+    final publicKey = await security.generateNewKeyPairString();
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/device/sync-recovered-key'),
+          headers: await _getHeaders(),
+          body: json.encode({
+            'device_uuid': deviceUuid,
+            'new_public_key': publicKey,
+            'current_password': currentPassword,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to recover the device signing key.'),
+      );
+    }
+  }
+
   Future<void> fetchTrustedTime() async {
     final configured = Uri.parse(baseUrl);
     final timeUri = configured.replace(
@@ -365,6 +389,7 @@ class ApiService {
       );
     }
 
+    final deviceUuid = await security.deviceUuid();
     final headers = await _getHeaders();
     final challengeResponse = await http.post(
       Uri.parse('$baseUrl/devices/enrollment-challenge'),
@@ -396,6 +421,7 @@ class ApiService {
       body: json.encode({
         'device_name': 'Android device',
         'platform': 'android',
+        'device_uuid': deviceUuid,
         'public_key': publicKey,
         'challenge_id': challengeId,
         'signature': signature,

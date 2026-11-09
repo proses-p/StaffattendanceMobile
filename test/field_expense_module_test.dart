@@ -15,6 +15,7 @@ import 'package:staff_attendance_mobile/screens/expense_capture_screen.dart';
 import 'package:staff_attendance_mobile/screens/field_mode_screen.dart';
 import 'package:staff_attendance_mobile/screens/my_expenses_screen.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
+import 'package:staff_attendance_mobile/services/device_security_service.dart';
 import 'package:staff_attendance_mobile/services/field_service.dart';
 import 'package:staff_attendance_mobile/services/field_expense_repository.dart';
 import 'package:staff_attendance_mobile/services/field_expense_service.dart';
@@ -428,6 +429,41 @@ void main() {
     },
   );
 
+  test('missing signing key remains queued until password-confirmed recovery succeeds', () async {
+    final db = await OfflineDb.instance.database;
+    const eventUuid = 'field-event-needing-key-recovery';
+    await db.insert('outbox', {
+      'owner_user_id': '7',
+      'client_uuid': eventUuid,
+      'type': 'field_clock_in',
+      'payload': '{}',
+      'recorded_at': DateTime.utc(2026, 11, 9).toIso8601String(),
+      'device_time': DateTime.utc(2026, 11, 9).toIso8601String(),
+      'time_source': 'device',
+      'status': 'pending',
+      'attempts': 0,
+    });
+    final apiService = _RecoverableSyncApiService();
+    final syncService = SyncService.forTesting(
+      apiService: apiService,
+      expenseService: FieldExpenseService(),
+    );
+
+    await syncService.flushForTesting();
+
+    expect(syncService.keyRecoveryRequired, isTrue);
+    expect(await db.query('outbox'), hasLength(1));
+
+    await syncService.recoverSigningKeyAndFlush('password');
+
+    expect(apiService.receivedPassword, 'password');
+    expect(syncService.keyRecoveryRequired, isFalse);
+    expect(apiService.syncedEvents, hasLength(1));
+    expect(apiService.syncedEvents.single.single['client_uuid'], eventUuid);
+    expect(await db.query('outbox'), isEmpty);
+    syncService.dispose();
+  });
+
   testWidgets('camera receipt capture shows a preview and retake action', (
     tester,
   ) async {
@@ -696,6 +732,38 @@ class _FakeSyncApiService extends ApiService {
           {'client_uuid': event['client_uuid'], 'status': 'applied'},
       ],
     };
+  }
+}
+
+class _RecoverableSyncApiService extends ApiService {
+  final syncedEvents = <List<Map<String, dynamic>>>[];
+  bool recovered = false;
+  String? receivedPassword;
+
+  @override
+  Future<Map<String, dynamic>> syncBatch(
+    List<Map<String, dynamic>> events,
+  ) async {
+    if (!recovered) {
+      throw const DeviceSecurityException(
+        'DEVICE_NOT_ENROLLED',
+        'This device has no secure signing key.',
+      );
+    }
+
+    syncedEvents.add(events);
+    return {
+      'results': [
+        for (final event in events)
+          {'client_uuid': event['client_uuid'], 'status': 'applied'},
+      ],
+    };
+  }
+
+  @override
+  Future<void> recoverSyncSigningKey(String currentPassword) async {
+    receivedPassword = currentPassword;
+    recovered = true;
   }
 }
 

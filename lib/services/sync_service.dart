@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
+import 'package:staff_attendance_mobile/services/device_security_service.dart';
 import 'package:staff_attendance_mobile/services/field_expense_service.dart';
 import 'package:staff_attendance_mobile/services/offline_db.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,12 +30,15 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
   bool _flushing = false;
   bool _online = false;
   bool _syncing = false;
+  bool _keyRecoveryRequired = false;
+  bool _recoveringKey = false;
   String? _lastError;
   int _pending = 0;
   int _failed = 0;
 
   bool get online => _online;
   bool get syncing => _syncing;
+  bool get keyRecoveryRequired => _keyRecoveryRequired;
   int get pendingCount => _pending;
   int get failedCount => _failed;
   String? get lastError => _lastError;
@@ -122,7 +126,7 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> flush() async {
-    if (!_initialized || !_online || _flushing) return;
+    if (!_initialized || !_online || _flushing || _recoveringKey) return;
     _flushing = true;
     _syncing = true;
     _lastError = null;
@@ -173,6 +177,12 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
         final Map<String, dynamic> response;
         try {
           response = await _api.syncBatch(events);
+        } on DeviceSecurityException catch (error) {
+          if (error.code == 'DEVICE_NOT_ENROLLED') {
+            _keyRecoveryRequired = true;
+          }
+          _lastError = error.message;
+          break;
         } on ApiRequestException catch (error) {
           if (shouldKeepPendingAfterRequestFailure(error.statusCode)) {
             _lastError = error.message;
@@ -184,6 +194,7 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
           _lastError = error.toString();
           break;
         }
+        _keyRecoveryRequired = false;
 
         final results = response['results'];
         if (results is! List) {
@@ -239,6 +250,31 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
       _syncing = false;
       await refreshCounts();
     }
+  }
+
+  Future<void> recoverSigningKeyAndFlush(String currentPassword) async {
+    if (!_keyRecoveryRequired || !_online || _flushing || _recoveringKey) {
+      return;
+    }
+
+    _recoveringKey = true;
+    _syncing = true;
+    notifyListeners();
+    var recovered = false;
+    try {
+      await _api.recoverSyncSigningKey(currentPassword);
+      _keyRecoveryRequired = false;
+      _lastError = null;
+      recovered = true;
+    } catch (error) {
+      _lastError = error.toString();
+    } finally {
+      _recoveringKey = false;
+      _syncing = false;
+      notifyListeners();
+    }
+
+    if (recovered) await flush();
   }
 
   @visibleForTesting

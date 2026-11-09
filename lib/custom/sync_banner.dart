@@ -4,6 +4,47 @@ import 'package:staff_attendance_mobile/services/sync_service.dart';
 class SyncBanner extends StatelessWidget {
   const SyncBanner({super.key});
 
+  Future<void> _recoverSigningKey(
+    BuildContext context,
+    SyncService sync,
+  ) async {
+    final controller = TextEditingController();
+    final currentPassword = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Recover secure signing key'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+          decoration: const InputDecoration(
+            labelText: 'Current account password',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final password = controller.text;
+              if (password.isNotEmpty) {
+                Navigator.of(dialogContext).pop(password);
+              }
+            },
+            child: const Text('Recover'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (currentPassword == null || !context.mounted) return;
+    await sync.recoverSigningKeyAndFlush(currentPassword);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -13,7 +54,8 @@ class SyncBanner extends StatelessWidget {
         if (sync.online &&
             !sync.syncing &&
             sync.pendingCount == 0 &&
-            sync.failedCount == 0) {
+            sync.failedCount == 0 &&
+            !sync.keyRecoveryRequired) {
           return const SizedBox.shrink();
         }
 
@@ -92,6 +134,13 @@ class SyncBanner extends StatelessWidget {
                     );
                   },
                   child: const Text('Review'),
+                ),
+              if (sync.keyRecoveryRequired)
+                TextButton(
+                  onPressed: sync.online && !sync.syncing
+                      ? () => _recoverSigningKey(context, sync)
+                      : null,
+                  child: const Text('Recover key'),
                 ),
             ],
           ),

@@ -2,6 +2,7 @@ package com.example.staff_attendance_mobile
 
 import android.os.Build
 import android.os.SystemClock
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
@@ -68,6 +69,33 @@ class MainActivity : FlutterFragmentActivity() {
                             )
                         }
                     }
+                    "generateNewKeyPairString" -> {
+                        try {
+                            result.success(generateNewRsaKeyPair())
+                        } catch (error: Exception) {
+                            logNativeFailure("generateNewKeyPairString", error)
+                            result.error(
+                                nativeErrorCode(error, "KEY_CREATION_FAILED"),
+                                userMessageFor("KEY_CREATION_FAILED"),
+                                null
+                            )
+                        }
+                    }
+                    "deviceUuid" -> {
+                        val deviceUuid = Settings.Secure.getString(
+                            contentResolver,
+                            Settings.Secure.ANDROID_ID
+                        )
+                        if (deviceUuid.isNullOrBlank()) {
+                            result.error(
+                                "DEVICE_ID_UNAVAILABLE",
+                                "The Android device identifier is unavailable.",
+                                null
+                            )
+                        } else {
+                            result.success(deviceUuid)
+                        }
+                    }
                     "sign" -> {
                         val message = call.argument<String>("message")
                         if (message.isNullOrEmpty() || message.length > 4096) {
@@ -116,6 +144,38 @@ class MainActivity : FlutterFragmentActivity() {
         return pem(publicKey.encoded)
     }
 
+    private fun generateNewRsaKeyPair(): String {
+        val keyStore = loadKeyStore()
+        keyStore.deleteEntry(keyAlias)
+
+        val generator = KeyPairGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_RSA,
+            "AndroidKeyStore"
+        )
+        val builder = KeyGenParameterSpec.Builder(
+            keyAlias,
+            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+        )
+            .setKeySize(2048)
+            .setDigests(KeyProperties.DIGEST_SHA256)
+            .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
+            .setUserAuthenticationRequired(true)
+            .setInvalidatedByBiometricEnrollment(true)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setUserAuthenticationParameters(
+                0,
+                KeyProperties.AUTH_BIOMETRIC_STRONG
+            )
+        } else {
+            builder.setUserAuthenticationValidityDurationSeconds(-1)
+        }
+
+        generator.initialize(builder.build())
+        val publicKey = generator.generateKeyPair().public
+        return Base64.getEncoder().encodeToString(publicKey.encoded)
+    }
+
     private fun signWithBiometrics(message: String, result: MethodChannel.Result) {
         val completed = AtomicBoolean(false)
 
@@ -133,7 +193,12 @@ class MainActivity : FlutterFragmentActivity() {
                 return
             }
 
-            val signature = Signature.getInstance("SHA256withECDSA")
+            val signatureAlgorithm = when (privateKey.algorithm) {
+                KeyProperties.KEY_ALGORITHM_EC -> "SHA256withECDSA"
+                KeyProperties.KEY_ALGORITHM_RSA -> "SHA256withRSA"
+                else -> throw InvalidKeyException("Unsupported signing key algorithm.")
+            }
+            val signature = Signature.getInstance(signatureAlgorithm)
             signature.initSign(privateKey)
             val executor: Executor = ContextCompat.getMainExecutor(this)
             val prompt = BiometricPrompt(
