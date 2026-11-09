@@ -2,6 +2,7 @@ class StaffProfile {
   const StaffProfile({
     required this.name,
     required this.email,
+    this.id,
     this.organization,
     this.phone,
     this.employeeId,
@@ -12,6 +13,7 @@ class StaffProfile {
 
   final String name;
   final String email;
+  final int? id;
   final String? organization;
   final String? phone;
   final String? employeeId;
@@ -21,6 +23,7 @@ class StaffProfile {
 
   factory StaffProfile.fromJson(Map<String, dynamic> json) {
     return StaffProfile(
+      id: json['id'] is int ? json['id'] as int : int.tryParse('${json['id']}'),
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
       organization: _optionalString(json['organization']),

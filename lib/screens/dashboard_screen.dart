@@ -2,14 +2,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:staff_attendance_mobile/models/dashboard_statistics_model.dart';
 import 'package:staff_attendance_mobile/models/user_status_model.dart';
 import 'package:staff_attendance_mobile/custom/attendance_card.dart';
+import 'package:staff_attendance_mobile/screens/on_field_screen.dart';
+import 'package:staff_attendance_mobile/screens/flagged_assignments_screen.dart';
 import 'package:staff_attendance_mobile/screens/attendance_history_screen.dart';
+import 'package:staff_attendance_mobile/screens/leave_management_screen.dart';
+import 'package:staff_attendance_mobile/screens/more_screen.dart';
 import 'package:staff_attendance_mobile/screens/profile_screen.dart';
+import 'package:staff_attendance_mobile/screens/profile_settings_screen.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
+import 'package:staff_attendance_mobile/services/device_security_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -29,6 +35,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DateTime _clockNow = DateTime.now();
   Timer? _workedHoursTimer;
   String _buttonState = 'CHECK_IN';
+  String? _role;
+  Map<String, dynamic>? _fieldStats;
+  Map<String, dynamic>? _adminStats;
 
   @override
   void initState() {
@@ -41,6 +50,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
+      if (_role == null) {
+        final preferences = await SharedPreferences.getInstance();
+        _role = preferences.getString('auth_role');
+        _role ??= (await _apiService.fetchProfile()).role;
+      }
+      if (_role == 'admin' || _role == 'manager') {
+        await _loadFieldStatistics();
+        if (!mounted) return;
+        setState(() {
+          _loadError = null;
+          _isLoading = false;
+        });
+        return;
+      }
+      unawaited(_loadFieldStatistics());
       final data = await _apiService.fetchDashboardData();
       if (!mounted) return;
       _clockNow = DateTime.now();
@@ -62,9 +86,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _loadError = e.toString();
         });
         if (_currentStatus != null) {
-          _showFeedbackSnackBar(e.toString());
+          _showFeedbackSnackBar(_displayError(e));
         }
       }
+    }
+  }
+
+  Future<void> _loadFieldStatistics() async {
+    try {
+      final fieldStats = _role == 'admin' || _role == 'manager'
+          ? null
+          : await _apiService.fetchFieldStats();
+      Map<String, dynamic>? adminStats;
+      if (_role == 'admin' || _role == 'manager') {
+        adminStats = await _apiService.fetchAdminFieldStats();
+      }
+      if (!mounted) return;
+      setState(() {
+        if (fieldStats != null) _fieldStats = fieldStats;
+        _adminStats = adminStats;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadError = error.toString());
     }
   }
 
@@ -95,12 +139,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     var dialogOpen = false;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final deviceStatus = await _apiService.fetchDeviceStatus();
       if (!mounted) return;
-      final String? token = prefs.getString('auth_token');
-      if (token == null) {
-        throw Exception('Tafadhali login upya.');
+      final status = deviceStatus['status']?.toString() ?? 'unknown';
+      if (status != 'active') {
+        await _showDeviceAccessDialog(status);
+        return;
       }
+      if (!await DeviceSecurityService().canSign()) {
+        throw Exception(
+          'Strong biometric authentication is not available. Set up strong '
+          'fingerprint or face biometrics in Android Settings, then retry. '
+          'Attendance was not submitted.',
+        );
+      }
+      if (!mounted) return;
 
       showDialog(
         context: context,
@@ -111,28 +164,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        throw Exception('Tafadhali washa GPS ya simu yako.');
+        throw Exception('Please turn on your GPS to track your location.');
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          throw Exception('Ruhusa ya GPS imekataliwa.');
+          throw Exception('Refusal of your GPS location.');
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
         throw Exception(
-          'Ruhusa ya GPS imezimwa. Iruhusu kupitia mipangilio ya simu yako.',
+          'Your location is turned off. Allow the location permission to your phone settings',
         );
       }
 
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
         ),
       );
+      if (position.accuracy > 30) {
+        throw Exception(
+          'Your location accuracy is ${position.accuracy.toStringAsFixed(0)}m. '
+          'Move to an open area and try again; 30m or better is required.',
+        );
+      }
       final endpoint = _buttonState == 'CHECK_IN'
           ? 'attendance/check-in'
           : 'attendance/check-out';
@@ -142,7 +202,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         latitude: position.latitude,
         longitude: position.longitude,
         accuracy: position.accuracy,
-        token: token,
+        locationTimestamp: position.timestamp,
       );
 
       if (result['success'] != true) {
@@ -165,7 +225,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (dialogOpen) {
           Navigator.of(context, rootNavigator: true).pop();
         }
-        _showFeedbackSnackBar(errorMessage.toString());
+        _showFeedbackSnackBar(_displayError(errorMessage));
       }
     } finally {
       if (mounted && _isSubmitting) {
@@ -173,6 +233,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
   }
+
+  Future<void> _showDeviceAccessDialog(String status) async {
+    final title = switch (status) {
+      'not_registered' => 'Device Registration Required',
+      'pending' => 'Administrator approval pending',
+      'revoked' => 'Device access revoked',
+      _ => 'Unable to confirm device approval',
+    };
+    final message = switch (status) {
+      'not_registered' =>
+        'You need to register this device before you can check in or check out. '
+            'Open Profile > Settings > Device Security and follow the registration steps.',
+      'pending' =>
+        'This device is registered and awaiting administrator approval. Wait for '
+            'approval or contact your administrator; do not register it again.',
+      'revoked' =>
+        'This device is no longer authorized for attendance. Contact your '
+            'administrator; if a replacement is needed, open Device Security.',
+      _ =>
+        'The server could not confirm that this device is approved. Refresh its '
+            'status in Device Security before trying attendance again.',
+    };
+    final canOpenSettings =
+        status == 'not_registered' ||
+        status == 'pending' ||
+        status == 'revoked';
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+          if (canOpenSettings)
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _openDeviceSecurity();
+              },
+              child: Text(
+                status == 'pending'
+                    ? 'View Device Status'
+                    : 'Go to Device Settings',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openDeviceSecurity() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => DeviceSecurityScreen(apiService: _apiService),
+      ),
+    );
+  }
+
+  String _displayError(Object error) =>
+      error.toString().replaceFirst(RegExp(r'^(Exception|StateError): '), '');
 
   void _showFeedbackSnackBar(String message, {bool isSuccess = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -190,10 +314,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        child: _isLoading && _currentStatus == null
+        child: _role == 'admin' || _role == 'manager'
+            ? _buildAdminDashboard()
+            : _isLoading && _currentStatus == null
             ? const Center(child: CircularProgressIndicator())
             : _currentStatus == null
-            ? _buildLoadError()
+            ? _fieldStats == null
+                  ? _buildLoadError()
+                  : ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(20),
+                      children: [
+                        _buildLoadError(),
+                        const SizedBox(height: 18),
+                        _buildEmployeeFieldStats(),
+                      ],
+                    )
             : RefreshIndicator(
                 onRefresh: _loadDashboardData,
                 child: ListView(
@@ -248,6 +384,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _buildNoAttendanceNotice(),
                       _buildStatisticsGrid(_currentStatus!.statistics!),
                     ],
+                    const SizedBox(height: 22),
+                    _buildEmployeeFieldStats(),
                   ],
                 ),
               ),
@@ -258,10 +396,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         selectedItemColor: primaryColor,
         unselectedItemColor: Colors.grey,
         onTap: (index) {
-          if (index == 4) {
+          if (index == 3) {
+            setState(() => _selectedIndex = index);
             Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => ProfileScreen(
+                builder: (_) => MoreScreen(
                   onSelectTab: (selectedIndex) {
                     setState(() => _selectedIndex = selectedIndex);
                   },
@@ -278,6 +417,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
             );
             return;
           }
+          if (index == 2) {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => LeaveManagementScreen(apiService: _apiService),
+              ),
+            );
+            return;
+          }
+          if (index == 4) {
+            setState(() => _selectedIndex = index);
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ProfileScreen(
+                  onSelectTab: (selectedIndex) {
+                    setState(() => _selectedIndex = selectedIndex);
+                  },
+                ),
+              ),
+            );
+            return;
+          }
           setState(() => _selectedIndex = index);
         },
         items: const [
@@ -288,16 +448,141 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.add_circle_outline),
-            label: 'Requests',
+            label: 'Leave',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline),
-            label: 'Chat',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),
             label: 'Profile',
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmployeeFieldStats() {
+    final stats = _fieldStats;
+    if (stats == null) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Field operations · ${stats['month'] ?? ''}',
+          style: const TextStyle(
+            color: Color(0xFF172033),
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _FieldStatCard(
+                title: 'Field hours',
+                value: '${stats['total_field_hours'] ?? 0}',
+                icon: Icons.work_history_outlined,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _FieldStatCard(
+                title: 'Avg daily hrs',
+                value: '${stats['avg_daily_hours'] ?? 0}',
+                icon: Icons.schedule_outlined,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _FieldStatCard(
+                title: 'Field visits',
+                value: '${stats['total_field_visits'] ?? 0}',
+                icon: Icons.location_on_outlined,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAdminDashboard() {
+    final stats = _adminStats;
+    return RefreshIndicator(
+      onRefresh: _loadDashboardData,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        children: [
+          _buildHeader('Admin'),
+          const SizedBox(height: 20),
+          const Text(
+            'Field operations',
+            style: TextStyle(
+              color: Color(0xFF172033),
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (stats == null)
+            _loadError == null
+                ? const Center(child: CircularProgressIndicator())
+                : _buildInlineError()
+          else ...[
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const OnFieldScreen()),
+              ),
+              child: _FieldStatCard(
+                title: 'On field',
+                value: '${stats['currently_on_field'] ?? 0}',
+                icon: Icons.people_alt_outlined,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _FieldStatCard(
+                    title: 'Missing',
+                    value: '${stats['missing_personnel'] ?? 0}',
+                    icon: Icons.person_off_outlined,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _FieldStatCard(
+                    title: 'Pending',
+                    value:
+                        '${(stats['pending_approvals'] as Map?)?['total'] ?? 0}',
+                    icon: Icons.pending_actions_outlined,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const FlaggedAssignmentsScreen(),
+                ),
+              ),
+              child: _FieldStatCard(
+                title: 'Flagged for review',
+                value: '${stats['flagged_assignments'] ?? 0}',
+                icon: Icons.flag_outlined,
+              ),
+            ),
+          ],
+          if (_loadError != null && stats != null) ...[
+            const SizedBox(height: 10),
+            _buildInlineError(),
+          ],
         ],
       ),
     );
@@ -317,7 +602,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Good Morning, $userName',
+                'Good Day, $userName',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -487,20 +772,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
           value: 'Breakdown',
           detail: null,
           breakdown: [
-            (
-              'Leave',
-              leaveDays == null ? 'Not configured' : _formatDays(leaveDays),
-            ),
+            ('Leave', leaveDays == null ? '-' : _formatDays(leaveDays)),
             (
               'Incomplete',
               incompleteDays == null
-                  ? 'Not configured'
+                  ? '-'
                   : '$incompleteDays day${incompleteDays == 1 ? '' : 's'}',
             ),
             (
               'Absent',
               statistics.absentDays == null
-                  ? 'Not configured'
+                  ? '-'
                   : '${statistics.absentDays} day${statistics.absentDays == 1 ? '' : 's'}',
             ),
           ],
@@ -523,7 +805,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return reason?.startsWith('There are no eligible scheduled working days') ==
             true
         ? 'No eligible days'
-        : 'Not configured';
+        : '-';
   }
 
   // Sehemu ya Menu ya chini (Bottom Navigation Bar)
@@ -603,10 +885,10 @@ class _DashboardStatCard extends StatelessWidget {
                 value,
                 maxLines: 1,
                 style: TextStyle(
-                  color: value == 'Not configured'
+                  color: value == '-'
                       ? const Color(0xFF64748B)
                       : const Color(0xFF172033),
-                  fontSize: value == 'Not configured' ? 16 : 23,
+                  fontSize: value == '-' ? 16 : 23,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -624,7 +906,7 @@ class _DashboardStatCard extends StatelessWidget {
                 ),
               ),
             ],
-            if (reason != null && value == 'Not configured') ...[
+            if (reason != null && value == '-') ...[
               const SizedBox(height: 3),
               Text(
                 reason!,
@@ -684,6 +966,54 @@ class _DashboardStatCard extends StatelessWidget {
               ),
             ],
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FieldStatCard extends StatelessWidget {
+  const _FieldStatCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 92),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 19, color: const Color(0xFFEA580C)),
+          const Spacer(),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF172033),
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+          ),
         ],
       ),
     );

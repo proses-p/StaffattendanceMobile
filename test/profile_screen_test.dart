@@ -33,11 +33,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Field Mode'), findsNothing);
     expect(find.text('Amina Hassan'), findsNWidgets(2));
     expect(find.text('amina@example.test'), findsNWidgets(2));
     expect(find.text('Not provided'), findsNWidgets(3));
     await tester.scrollUntilVisible(find.text('STAFF'), 300);
     expect(find.text('STAFF'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Sign out'), 300);
     expect(find.text('Sign out'), findsOneWidget);
   });
 }

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:staff_attendance_mobile/models/profile_model.dart';
 import 'package:staff_attendance_mobile/screens/attendance_history_screen.dart';
 import 'package:staff_attendance_mobile/screens/edit_profile_screen.dart';
+import 'package:staff_attendance_mobile/screens/leave_management_screen.dart';
 import 'package:staff_attendance_mobile/screens/login_screen.dart';
+import 'package:staff_attendance_mobile/screens/more_screen.dart';
 import 'package:staff_attendance_mobile/screens/profile_settings_screen.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
 import 'package:staff_attendance_mobile/services/auth_service.dart';
@@ -149,6 +151,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
           builder: (_) => const AttendanceHistoryScreen(),
+        ),
+      );
+    } else if (index == 2) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => LeaveManagementScreen(apiService: _apiService),
+        ),
+      );
+    } else if (index == 3) {
+      widget.onSelectTab?.call(index);
+      await Navigator.of(context).pushReplacement<void, void>(
+        MaterialPageRoute<void>(
+          builder: (_) => MoreScreen(onSelectTab: widget.onSelectTab),
         ),
       );
     } else if (index != 4) {
@@ -312,12 +327,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.add_circle_outline),
-            label: 'Requests',
+            label: 'Leave',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline),
-            label: 'Chat',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),
             label: 'Profile',

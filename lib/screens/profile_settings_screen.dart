@@ -92,6 +92,18 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                 subtitle: 'Verify your current password before updating it.',
                 onTap: _openPasswordChange,
               ),
+              _SettingsTile(
+                icon: Icons.fingerprint,
+                title: 'Device Security',
+                subtitle:
+                    'View device registration and administrator approval.',
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        DeviceSecurityScreen(apiService: _apiService),
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 22),
@@ -139,6 +151,247 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       ),
     );
   }
+}
+
+class DeviceSecurityScreen extends StatefulWidget {
+  const DeviceSecurityScreen({required this.apiService, super.key});
+
+  final ApiService apiService;
+
+  @override
+  State<DeviceSecurityScreen> createState() => _DeviceSecurityScreenState();
+}
+
+class _DeviceSecurityScreenState extends State<DeviceSecurityScreen> {
+  Map<String, dynamic>? _deviceStatus;
+  Object? _loadError;
+  bool _isLoading = true;
+  bool _isRegistering = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeviceStatus();
+  }
+
+  Future<void> _loadDeviceStatus() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    try {
+      final status = await widget.apiService.fetchDeviceStatus();
+      if (!mounted) return;
+      setState(() {
+        _deviceStatus = status;
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = error;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _registerDevice() async {
+    if (_isRegistering) return;
+    final status = _deviceStatus?['status']?.toString();
+    if (status != 'not_registered' && status != 'revoked') return;
+
+    setState(() => _isRegistering = true);
+    try {
+      final response = await widget.apiService.enrollCurrentDevice(
+        replaceExistingKey: status == 'revoked',
+      );
+      final device = response['device'];
+      if (mounted && device is Map) {
+        setState(() => _deviceStatus = {'status': device['status']});
+      }
+      await _loadDeviceStatus();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_displayError(error)),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isRegistering = false);
+    }
+  }
+
+  String _displayError(Object error) =>
+      error.toString().replaceFirst(RegExp(r'^(Exception|StateError): '), '');
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _deviceStatus?['status']?.toString();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8FAFC),
+        foregroundColor: const Color(0xFF172033),
+        elevation: 0,
+        title: const Text(
+          'Device Security',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh device status',
+            onPressed: _isLoading ? null : _loadDeviceStatus,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _loadDeviceStatus,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+              children: [
+                if (_isLoading && _deviceStatus == null)
+                  const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_loadError != null && _deviceStatus == null)
+                  _buildStatusCard(
+                    icon: Icons.error_outline,
+                    title: 'Unable to load device status',
+                    description:
+                        '${_displayError(_loadError!)} Refresh to try again.',
+                    color: const Color(0xFFFFF1F2),
+                    borderColor: const Color(0xFFFECDD3),
+                  )
+                else
+                  _buildStatusCard(
+                    icon: _statusIcon(status),
+                    title: _statusTitle(status),
+                    description: _statusDescription(status),
+                    color: _statusColor(status),
+                    borderColor: _statusBorderColor(status),
+                  ),
+                if (_loadError != null && _deviceStatus != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Could not refresh device status: '
+                    '${_displayError(_loadError!)}',
+                    style: const TextStyle(
+                      color: Color(0xFFB91C1C),
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+                if (status == 'not_registered' || status == 'revoked') ...[
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _isRegistering ? null : _registerDevice,
+                    icon: _isRegistering
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.fingerprint),
+                    label: Text(
+                      _isRegistering
+                          ? 'Registering…'
+                          : status == 'revoked'
+                          ? 'Request replacement device'
+                          : 'Register Device',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusCard({
+    required IconData icon,
+    required String title,
+    required String description,
+    required Color color,
+    required Color borderColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFF172033)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Text(description, style: const TextStyle(height: 1.45)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _statusIcon(String? status) => switch (status) {
+    'active' => Icons.verified_user_outlined,
+    'pending' => Icons.hourglass_top_rounded,
+    'revoked' => Icons.gpp_bad_outlined,
+    _ => Icons.phonelink_lock_outlined,
+  };
+
+  String _statusTitle(String? status) => switch (status) {
+    'active' => 'Approved and ready for attendance',
+    'pending' => 'Awaiting administrator approval',
+    'revoked' => 'Device access revoked',
+    'not_registered' => 'Device not registered',
+    _ => 'Device status unavailable',
+  };
+
+  String _statusDescription(String? status) => switch (status) {
+    'active' =>
+      'This device is approved and can securely sign attendance actions.',
+    'pending' => 'Your device is registered and awaiting administrator approval. Wait for approval or contact your administrator; do not register this device again.',
+    'revoked' => 'This device cannot record attendance. Contact your administrator; if a replacement is needed, request a new registration here. Approval is required before attendance is enabled.',
+    'not_registered' => 'Register this Android device and wait for administrator approval before checking in or out.',
+    _ => 'Refresh to check the registration status. Attendance authorization is confirmed by the server.',
+  };
+
+  Color _statusColor(String? status) => switch (status) {
+    'active' => const Color(0xFFF0FDF4),
+    'pending' => const Color(0xFFFFF7ED),
+    'revoked' => const Color(0xFFFFF1F2),
+    _ => const Color(0xFFF1F5F9),
+  };
+
+  Color _statusBorderColor(String? status) => switch (status) {
+    'active' => const Color(0xFFBBF7D0),
+    'pending' => const Color(0xFFFED7AA),
+    'revoked' => const Color(0xFFFECDD3),
+    _ => const Color(0xFFE2E8F0),
+  };
 }
 
 class ChangePasswordScreen extends StatefulWidget {

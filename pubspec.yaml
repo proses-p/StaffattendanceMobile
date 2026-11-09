@@ -35,14 +35,26 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   http: ^1.6.0
+  http_parser: ^4.1.2
   # flutter_face_liveness: ^3.6.0
   shared_preferences: ^2.5.6
   geolocator: ^14.1.1
   package_info_plus: ^10.2.2
+  app_links: ^7.2.2
+  safe_device: ^1.4.1
+  sqflite: ^2.4.5
+  path: ^1.9.1
+  connectivity_plus: ^7.3.1
+  url_launcher: ^6.3.3
+  uuid: ^4.6.0
+  crypto: ^3.0.8
+  image_picker: ^1.2.1
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  sqflite_common_ffi: ^2.3.6
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
