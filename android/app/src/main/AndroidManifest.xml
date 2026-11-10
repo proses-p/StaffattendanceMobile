@@ -8,7 +8,7 @@
 
 
     <application
-        android:label="staff_attendance_mobile"
+        android:label="staffFlow"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 	

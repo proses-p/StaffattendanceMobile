@@ -1,7 +1,7 @@
-// dashboard_screen.dart
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:staff_attendance_mobile/models/dashboard_statistics_model.dart';
@@ -26,7 +26,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final ApiService _apiService = ApiService();
-  int _selectedIndex = 2; // Inafanya icon ya 'Home' iwe active mwanzo
+  int _selectedIndex = 0; // Inafanya icon ya 'Home' iwe active mwanzo
 
   UserStatusModel? _currentStatus;
   bool _isLoading = true;
@@ -311,15 +311,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFFFB923C);
+
+    // Set status bar icons to light (white) to match the orange background header
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+    );
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      body: SafeArea(
-        child: _role == 'admin' || _role == 'manager'
-            ? _buildAdminDashboard()
-            : _isLoading && _currentStatus == null
-            ? const Center(child: CircularProgressIndicator())
-            : _currentStatus == null
-            ? _fieldStats == null
+      body: _role == 'admin' || _role == 'manager'
+          ? SafeArea(child: _buildAdminDashboard())
+          : _isLoading && _currentStatus == null
+          ? const Center(child: CircularProgressIndicator())
+          : _currentStatus == null
+          ? SafeArea(
+              child: _fieldStats == null
                   ? _buildLoadError()
                   : ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
@@ -329,72 +338,108 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: 18),
                         _buildEmployeeFieldStats(),
                       ],
-                    )
-            : RefreshIndicator(
-                onRefresh: _loadDashboardData,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                  children: [
-                    _buildHeader(_currentStatus!.userName),
-                    const SizedBox(height: 18),
-                    if (_loadError != null) ...[
-                      _buildInlineError(),
-                      const SizedBox(height: 14),
-                    ],
-                    AttendanceCard(
-                      status: _currentStatus!,
-                      now: _clockNow,
-                      buttonState: _buttonState,
-                      onAttendanceAction: _handleAttendanceAction,
-                      isSubmitting: _isSubmitting,
                     ),
-                    const SizedBox(height: 22),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.end,
+            )
+          : RefreshIndicator(
+              onRefresh: _loadDashboardData,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                children: [
+                  // ===================================================
+                  // EXTENDED ORANGE HERO CONTAINER (Top to Attendance Card)
+                  // ===================================================
+                  Container(
+                    width: double.infinity,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFB923C), // Vibrant Orange
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(32),
+                        bottomRight: Radius.circular(32),
+                      ),
+                    ),
+                    padding: EdgeInsets.only(
+                      top: MediaQuery.of(context).padding.top + 16,
+                      left: 20,
+                      right: 20,
+                      bottom: 28,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Your statistics',
-                          style: TextStyle(
-                            color: Color(0xFF172033),
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        _buildHeroHeader(_currentStatus!.userName),
+                        const SizedBox(height: 18),
+                        if (_loadError != null) ...[
+                          _buildInlineError(),
+                          const SizedBox(height: 14),
+                        ],
+                        AttendanceCard(
+                          status: _currentStatus!,
+                          now: _clockNow,
+                          buttonState: _buttonState,
+                          onAttendanceAction: _handleAttendanceAction,
+                          isSubmitting: _isSubmitting,
                         ),
-                        if (_currentStatus!
-                                .statistics
-                                ?.reportingPeriod
-                                .isNotEmpty ==
-                            true)
-                          Text(
-                            _currentStatus!.statistics!.reportingPeriod,
-                            style: const TextStyle(
-                              color: Color(0xFF64748B),
-                              fontSize: 11,
-                            ),
-                          ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    if (_currentStatus!.statistics == null)
-                      _buildStatisticsUnavailable()
-                    else ...[
-                      if (!_currentStatus!.statistics!.hasAttendanceHistory)
-                        _buildNoAttendanceNotice(),
-                      _buildStatisticsGrid(_currentStatus!.statistics!),
-                    ],
-                    const SizedBox(height: 22),
-                    _buildEmployeeFieldStats(),
-                  ],
-                ),
+                  ),
+
+                  // ===================================================
+                  // STATISTICS & LOWER SECTIONS (White / Light Background)
+                  // ===================================================
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text(
+                              'Your statistics',
+                              style: TextStyle(
+                                color: Color(0xFF172033),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (_currentStatus!
+                                    .statistics
+                                    ?.reportingPeriod
+                                    .isNotEmpty ==
+                                true)
+                              Text(
+                                _currentStatus!.statistics!.reportingPeriod,
+                                style: const TextStyle(
+                                  color: Color(0xFF64748B),
+                                  fontSize: 11,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        if (_currentStatus!.statistics == null)
+                          _buildStatisticsUnavailable()
+                        else ...[
+                          if (!_currentStatus!.statistics!.hasAttendanceHistory)
+                            _buildNoAttendanceNotice(),
+                          _buildStatisticsGrid(_currentStatus!.statistics!),
+                        ],
+                        const SizedBox(height: 22),
+                        _buildEmployeeFieldStats(),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-      ),
+            ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: primaryColor,
-        unselectedItemColor: Colors.grey,
+        backgroundColor: Color(0xFFFB923C),
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white70,
         onTap: (index) {
           if (index == 3) {
             setState(() => _selectedIndex = index);
@@ -447,7 +492,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: 'History',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.add_circle_outline),
+            icon: Icon(Icons.time_to_leave),
             label: 'Leave',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),
@@ -588,6 +633,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // Header styled specifically for the Orange Hero Background (white text & icons)
+  Widget _buildHeroHeader(String userName) {
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 22,
+          backgroundColor: Colors.white.withOpacity(0.25),
+          child: const Icon(Icons.person, color: Colors.white),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Good Day, $userName',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'Have a productive day',
+                style: TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.2),
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.notifications_outlined, color: Colors.white),
+            onPressed: () {},
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Standard Header for non-orange sections (e.g. Admin view)
   Widget _buildHeader(String userName) {
     return Row(
       children: [
@@ -661,17 +753,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF7ED),
+        color: Colors.white.withOpacity(0.2),
         borderRadius: BorderRadius.circular(12),
       ),
       child: const Row(
         children: [
-          Icon(Icons.cloud_off_outlined, color: Color(0xFFB45309), size: 18),
+          Icon(Icons.cloud_off_outlined, color: Colors.white, size: 18),
           SizedBox(width: 8),
           Expanded(
             child: Text(
               'Could not refresh your latest attendance data.',
-              style: TextStyle(color: Color(0xFF92400E), fontSize: 12),
+              style: TextStyle(color: Colors.white, fontSize: 12),
             ),
           ),
         ],
@@ -724,9 +816,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.9,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 0.88,
       ),
       children: [
         _DashboardStatCard(
@@ -807,8 +899,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ? 'No eligible days'
         : '-';
   }
-
-  // Sehemu ya Menu ya chini (Bottom Navigation Bar)
 }
 
 class _DashboardStatCard extends StatelessWidget {
@@ -833,7 +923,7 @@ class _DashboardStatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(19),
@@ -868,9 +958,9 @@ class _DashboardStatCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Color(0xFF475569),
-                    fontSize: 11,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    height: 1.15,
+                    height: 1.1,
                   ),
                 ),
               ),
@@ -888,7 +978,7 @@ class _DashboardStatCard extends StatelessWidget {
                   color: value == '-'
                       ? const Color(0xFF64748B)
                       : const Color(0xFF172033),
-                  fontSize: value == '-' ? 16 : 23,
+                  fontSize: value == '-' ? 16 : 26,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -901,7 +991,7 @@ class _DashboardStatCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Color(0xFF64748B),
-                  fontSize: 10,
+                  fontSize: 11,
                   height: 1.25,
                 ),
               ),
@@ -986,33 +1076,29 @@ class _FieldStatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 92),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: const Color(0xFFE8EDF4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 19, color: const Color(0xFFEA580C)),
-          const Spacer(),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Color(0xFF172033),
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
+          Icon(icon, size: 20, color: const Color(0xFFFB923C)),
+          const SizedBox(height: 8),
           Text(
             title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF172033),
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),

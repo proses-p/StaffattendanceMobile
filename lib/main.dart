@@ -31,6 +31,15 @@ class _StaffFlowAppState extends State<StaffFlowApp> {
   }
 
   Future<void> _initializeLinks() async {
+
+    try {
+      final Uri? initialUri = await _appLinks.getInitialLink();
+      if (initialUri != null) {
+        _handleInvitationLink(initialUri);
+      }
+    } catch (e) {
+      debugPrint('Initial link error: $e');
+    }
     _linkSubscription = _appLinks.uriLinkStream.listen(
       _handleInvitationLink,
       onError: (Object error) {

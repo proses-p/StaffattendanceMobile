@@ -314,10 +314,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 4,
+        currentIndex: 0,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: _primaryColor,
-        unselectedItemColor: Colors.grey,
+        backgroundColor: Color(0xFFFB923C),
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white70,
+        elevation: 0,
         onTap: _navigateToTab,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
@@ -326,7 +328,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             label: 'History',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.add_circle_outline),
+            icon: Icon(Icons.time_to_leave),
             label: 'Leave',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),

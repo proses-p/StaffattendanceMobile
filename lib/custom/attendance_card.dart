@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:staff_attendance_mobile/custom/check_in_button.dart';
 import 'package:staff_attendance_mobile/models/user_status_model.dart';
 
-class AttendanceCard extends StatelessWidget {
+class AttendanceCard extends StatefulWidget {
   const AttendanceCard({
     super.key,
     required this.status,
@@ -19,6 +21,39 @@ class AttendanceCard extends StatelessWidget {
   final bool isSubmitting;
 
   @override
+  State<AttendanceCard> createState() => _AttendanceCardState();
+}
+
+class _AttendanceCardState extends State<AttendanceCard> {
+  late DateTime _liveNow;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _liveNow = widget.now;
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _liveNow = DateTime.now();
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _formatTime(DateTime time) {
+    return DateFormat('HH:mm:ss').format(time);
+  }
+
+
+
+  @override 
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFFFB923C);
     return Container(
@@ -46,7 +81,7 @@ class AttendanceCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      status.currentTime,
+                      _formatTime(_liveNow),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 25,
@@ -54,7 +89,7 @@ class AttendanceCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      status.currentDate,
+                      widget.status.currentDate,
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 13,
@@ -67,9 +102,9 @@ class AttendanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           CheckInButton(
-            buttonState: buttonState,
-            isSubmitting: isSubmitting,
-            onTap: onAttendanceAction,
+            buttonState: widget.buttonState,
+            isSubmitting: widget.isSubmitting,
+            onTap: widget.onAttendanceAction,
           ),
           const SizedBox(height: 15),
           Divider(color: Colors.white.withValues(alpha: 0.2), height: 1),
@@ -79,12 +114,12 @@ class AttendanceCard extends StatelessWidget {
               Expanded(
                 child: _buildStatusItem(
                   'Worked Hrs',
-                  status.workedHoursAt(now),
+                  widget.status.workedHoursAt(_liveNow),
                 ),
               ),
-              Expanded(child: _buildStatusItem('Check In', status.checkInTime)),
+              Expanded(child: _buildStatusItem('Check In', widget.status.checkInTime)),
               Expanded(
-                child: _buildStatusItem('Check Out', status.checkOutTime),
+                child: _buildStatusItem('Check Out', widget.status.checkOutTime),
               ),
             ],
           ),
