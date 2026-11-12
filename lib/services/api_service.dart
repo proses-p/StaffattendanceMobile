@@ -164,6 +164,24 @@ class ApiService {
     await TrustedClock.instance.anchor(DateTime.parse(value));
   }
 
+    // Method ya kuvuta notifications ambazo hazijasomwa kutoka Laravel
+    Future<List<dynamic>> fetchUnreadNotifications() async {
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/notifications/unread'),
+          headers: await _getHeaders(),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) {
+      final data = _decodeResponse(response);
+      return data['notifications'] as List<dynamic>? ?? [];
+    }
+    return [];
+  }
+
+
+
   Future<Map<String, dynamic>> fetchFieldStats({
     bool allowCached = true,
   }) async {

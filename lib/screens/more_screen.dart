@@ -76,8 +76,9 @@ class MoreScreen extends StatelessWidget {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 3,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: _primaryColor,
-        unselectedItemColor: Colors.grey,
+        backgroundColor: _primaryColor,
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white70,
         onTap: (index) => _navigateToTab(context, index),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
@@ -86,7 +87,7 @@ class MoreScreen extends StatelessWidget {
             label: 'History',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.add_circle_outline),
+            icon: Icon(Icons.time_to_leave),
             label: 'Leave',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.more_horiz), label: 'More'),

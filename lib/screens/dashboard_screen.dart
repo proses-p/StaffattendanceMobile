@@ -16,6 +16,10 @@ import 'package:staff_attendance_mobile/screens/profile_screen.dart';
 import 'package:staff_attendance_mobile/screens/profile_settings_screen.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
 import 'package:staff_attendance_mobile/services/device_security_service.dart';
+import 'package:staff_attendance_mobile/services/notification_storage.dart';
+import 'package:staff_attendance_mobile/screens/notifications_screen.dart';
+import 'package:staff_attendance_mobile/screens/notification_service.dart';
+
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -34,6 +38,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _loadError;
   DateTime _clockNow = DateTime.now();
   Timer? _workedHoursTimer;
+  Timer? _notificationTimer;
   String _buttonState = 'CHECK_IN';
   String? _role;
   Map<String, dynamic>? _fieldStats;
@@ -43,12 +48,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _loadDashboardData();
+    _startNotificationSync();
   }
 
   // function to load dashboard data
-  Future<void> _loadDashboardData() async {
+  Future<void> _loadDashboardData({bool showLoading = true}) async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    if (showLoading) {
+      setState(() => _isLoading = true);
+    }
     try {
       if (_role == null) {
         final preferences = await SharedPreferences.getInstance();
@@ -128,15 +136,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _workedHoursTimer?.cancel();
+    _notificationTimer?.cancel();
     super.dispose();
   }
+
+  void _startNotificationSync() {
+    // Kagua mara moja app ikifunguka
+    _checkServerNotifications();
+
+    // Endelea kukagua kila baada ya sekunde 20 mtumiaji akiwa ndani ya app
+    _notificationTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _checkServerNotifications();
+    });
+  }
+
+  Future<void> _checkServerNotifications() async {
+    try {
+      final items = await _apiService.fetchUnreadNotifications();
+      if (items.isEmpty) return;
+
+      for (var item in items) {
+        final String title = item['title']?.toString() ?? 'Taarifa Mpya';
+        final String body = item['body']?.toString() ?? '';
+        final int id = item['id'] is int
+            ? item['id']
+            : DateTime.now().millisecondsSinceEpoch;
+
+        // 1. Hifadhi kwenye kengele ya ndani ya App (Badge itaongezeka!)
+        await NotificationStorage.addNotification(title, body);
+
+        // 2. Piga mlio wa notification juu ya screen ya simu
+        await NotificationService().showInstantNotification(
+          id: id,
+          title: title,
+          body: body,
+        );
+      }
+
+      // Onyesha mabadiliko kwenye icon ya kengele (Badge namba ionekane)
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {
+      // Kama mtandao unasumbua, isilete error kwenye screen; itajaribu tena baada ya sekunde 20
+    }
+  }
+
 
   // function to handle check and check out
   Future<void> _handleAttendanceAction() async {
     if (_isSubmitting || _buttonState == 'COMPLETED') return;
 
     setState(() => _isSubmitting = true);
-    var dialogOpen = false;
 
     try {
       final deviceStatus = await _apiService.fetchDeviceStatus();
@@ -154,13 +205,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
       if (!mounted) return;
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
-      dialogOpen = true;
 
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -212,19 +256,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      dialogOpen = false;
       _showFeedbackSnackBar(
         result['message']?.toString() ?? 'Attendance recorded successfully.',
         isSuccess: true,
       );
       setState(() => _isSubmitting = false);
-      await _loadDashboardData();
+      unawaited(_loadDashboardData(showLoading: false));
     } catch (errorMessage) {
       if (mounted) {
-        if (dialogOpen) {
-          Navigator.of(context, rootNavigator: true).pop();
-        }
         _showFeedbackSnackBar(_displayError(errorMessage));
       }
     } finally {
@@ -352,7 +391,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Container(
                     width: double.infinity,
                     decoration: const BoxDecoration(
-                      color: Color(0xFFFB923C), // Vibrant Orange
+                      color: primaryColor, // Vibrant Orange
                       borderRadius: BorderRadius.only(
                         bottomLeft: Radius.circular(32),
                         bottomRight: Radius.circular(32),
@@ -670,14 +709,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
             color: Colors.white.withOpacity(0.2),
             shape: BoxShape.circle,
           ),
-          child: IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: Colors.white),
-            onPressed: () {},
-          ),
+          child: _buildNotificationBell(),
         ),
       ],
     );
   }
+
+  
+Widget _buildNotificationBell() {
+  return FutureBuilder<int>(
+    future: NotificationStorage.getUnreadCount(),
+    builder: (context, snapshot) {
+      final int unreadCount = snapshot.data ?? 0;
+
+      return IconButton(
+        onPressed: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+          );
+          setState(() {}); // Refresh namba ya kengele ikirudi Home (iwe 0)
+        },
+        icon: Badge(
+          isLabelVisible: unreadCount > 0,
+          label: Text('$unreadCount'),
+          backgroundColor: Colors.red,
+          child: const Icon(Icons.notifications_outlined, size: 28),
+        ),
+      );
+    },
+  );
+}
 
   // Standard Header for non-orange sections (e.g. Admin view)
   Widget _buildHeader(String userName) {

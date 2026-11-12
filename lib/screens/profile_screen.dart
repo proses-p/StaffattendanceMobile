@@ -213,11 +213,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(height: 22),
                         _ProfileSection(
                           title: 'Personal information',
-                          trailing: TextButton.icon(
-                            onPressed: _editProfile,
-                            icon: const Icon(Icons.edit_outlined, size: 18),
-                            label: const Text('Edit'),
-                          ),
                           children: [
                             _ProfileInfoRow(
                               icon: Icons.person_outline,

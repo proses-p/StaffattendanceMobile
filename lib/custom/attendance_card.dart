@@ -134,7 +134,7 @@ class _AttendanceCardState extends State<AttendanceCard> {
       children: [
         Text(
           label,
-          style: const TextStyle(color: Colors.white70, fontSize: 11),
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
         ),
         const SizedBox(height: 4),
         Text(
@@ -143,7 +143,7 @@ class _AttendanceCardState extends State<AttendanceCard> {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 13,
+            fontSize: 14,
             fontWeight: FontWeight.bold,
           ),
         ),
