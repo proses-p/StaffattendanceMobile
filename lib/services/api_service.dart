@@ -20,15 +20,10 @@ class ApiRequestException implements Exception {
   final int statusCode;
   final String message;
 
-  @override
-  String toString() => message;
   final String? code;
-
   @override
   String toString() => message;
 
-  @override
-  String toString() => message;
 }
 
 class ApiService {
