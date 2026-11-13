@@ -6,7 +6,7 @@ void main() {
     const token =
         '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
     const email = 'staff@example.test';
-    final uri = Uri.https('taarifa.wadudu.co.tz', '/staff/register/$token', {
+    final uri = Uri.https('app.taarifa.wadudu.co.tz', '/staff/register/$token', {
       'email': email,
     });
 

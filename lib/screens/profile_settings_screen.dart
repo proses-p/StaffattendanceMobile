@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
+import 'package:staff_attendance_mobile/services/sync_service.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
   const ProfileSettingsScreen({this.apiService, super.key});
@@ -15,13 +16,23 @@ class ProfileSettingsScreen extends StatefulWidget {
 
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   late final ApiService _apiService = widget.apiService ?? ApiService();
+  final TextEditingController _recoveryPasswordController =
+      TextEditingController();
   PackageInfo? _packageInfo;
   bool _packageInfoUnavailable = false;
+  bool _isRecoveringKey = false;
+  String? _keyRecoveryError;
 
   @override
   void initState() {
     super.initState();
     _loadPackageInfo();
+  }
+
+  @override
+  void dispose() {
+    _recoveryPasswordController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPackageInfo() async {
@@ -66,6 +77,35 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     );
   }
 
+  Future<void> _recoverSigningKey() async {
+    if (_isRecoveringKey || _recoveryPasswordController.text.isEmpty) return;
+    setState(() {
+      _isRecoveringKey = true;
+      _keyRecoveryError = null;
+    });
+    try {
+      await SyncService.instance.recoverSigningKeyAndFlush(
+        _recoveryPasswordController.text,
+        apiService: _apiService,
+      );
+      if (!mounted) return;
+      _recoveryPasswordController.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Device signing key recovered.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _keyRecoveryError = error.toString().replaceFirst(
+          RegExp(r'^(Exception|StateError): '),
+          '',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _isRecoveringKey = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final packageInfo = _packageInfo;
@@ -102,6 +142,70 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                     builder: (_) =>
                         DeviceSecurityScreen(apiService: _apiService),
                   ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Recover Device Signing Key',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Enter your current account password to restore secure attendance and field sync.',
+                      style: TextStyle(
+                        color: Color(0xFF64748B),
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _recoveryPasswordController,
+                      obscureText: true,
+                      textInputAction: TextInputAction.done,
+                      onChanged: (_) => setState(() {}),
+                      onSubmitted: (_) => _recoverSigningKey(),
+                      decoration: const InputDecoration(
+                        labelText: 'Current account password',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    if (_keyRecoveryError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _keyRecoveryError!,
+                        style: const TextStyle(color: Color(0xFFB91C1C)),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed:
+                            _isRecoveringKey ||
+                                _recoveryPasswordController.text.isEmpty
+                            ? null
+                            : _recoverSigningKey,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFB923C),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: _isRecoveringKey
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Recover key'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:staff_attendance_mobile/screens/attendance_history_screen.dart';
+import 'package:staff_attendance_mobile/screens/daily_work_submission_screen.dart';
 import 'package:staff_attendance_mobile/screens/field_mode_screen.dart';
 import 'package:staff_attendance_mobile/screens/leave_management_screen.dart';
 import 'package:staff_attendance_mobile/screens/profile_screen.dart';
@@ -67,6 +68,25 @@ class MoreScreen extends StatelessWidget {
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
                   builder: (_) => const FieldModeScreen(),
+                ),
+              ),
+            ),
+          ),
+          Card(
+            color: Colors.white,
+            child: ListTile(
+              leading: const Icon(
+                Icons.assignment_turned_in_outlined,
+                color: _primaryColor,
+              ),
+              title: const Text('Daily Work Submission'),
+              subtitle: const Text('Submit today’s work and review feedback.'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => DailyWorkSubmissionScreen(
+                    apiService: ApiService(),
+                  ),
                 ),
               ),
             ),

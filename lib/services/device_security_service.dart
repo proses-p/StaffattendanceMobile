@@ -142,8 +142,8 @@ class DeviceSecurityService {
   String _messageFor(PlatformException error) {
     return switch (error.code) {
       'BIOMETRIC_CANCELLED' => 'Biometric confirmation was cancelled. No secure request was submitted.',
-      'BIOMETRIC_NOT_ENROLLED' => 'Set up a strong fingerprint or face biometric in Android Settings, then try again.',
-      'BIOMETRIC_UNAVAILABLE' => 'Strong biometric authentication is unavailable. Try again later or use a supported device.',
+      'BIOMETRIC_NOT_ENROLLED' => 'Set up a screen lock (Fingerprint, Face, PIN, Pattern, or Password) in Android Settings, then try again.',
+      'BIOMETRIC_UNAVAILABLE' => 'Set up a screen lock (Fingerprint, Face, PIN, Pattern, or Password) in Android Settings, then try again.',
       'BIOMETRIC_LOCKOUT' =>
         'Biometric authentication is temporarily locked. Wait and try again.',
       'BIOMETRIC_LOCKOUT_PERMANENT' => 'Biometric authentication is locked. Unlock the device with its screen lock, then try again.',

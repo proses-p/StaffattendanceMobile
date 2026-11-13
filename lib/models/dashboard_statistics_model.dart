@@ -2,7 +2,12 @@ class DashboardStatistics {
   const DashboardStatistics({
     required this.reportingPeriod,
     required this.overtimeMinutes,
+    required this.overtimeDays,
+    required this.beforeTimeMinutes,
     required this.onTimeRatePercent,
+    required this.onTimeDays,
+    required this.standardWorkedMinutes,
+    required this.lateDays,
     required this.totalWorkedMinutes,
     required this.attendanceRatePercent,
     required this.approvedLeaveDays,
@@ -14,7 +19,12 @@ class DashboardStatistics {
 
   final String reportingPeriod;
   final int? overtimeMinutes;
+  final int? overtimeDays;
+  final int? beforeTimeMinutes;
   final double? onTimeRatePercent;
+  final int? onTimeDays;
+  final int? standardWorkedMinutes;
+  final int? lateDays;
   final int totalWorkedMinutes;
   final double? attendanceRatePercent;
   final double? approvedLeaveDays;
@@ -39,7 +49,12 @@ class DashboardStatistics {
     return DashboardStatistics(
       reportingPeriod: period?['label']?.toString() ?? '',
       overtimeMinutes: _integer(json['overtime_minutes']),
+      overtimeDays: _integer(json['overtime_days']),
+      beforeTimeMinutes: _integer(json['before_time_minutes']),
       onTimeRatePercent: _decimal(json['on_time_rate_percent']),
+      onTimeDays: _integer(json['on_time_days']),
+      standardWorkedMinutes: _integer(json['standard_worked_minutes']),
+      lateDays: _integer(json['late_days']),
       totalWorkedMinutes: totalWorkedMinutes,
       attendanceRatePercent: _decimal(json['attendance_rate_percent']),
       approvedLeaveDays: _decimal(json['approved_leave_days']),

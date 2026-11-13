@@ -15,10 +15,17 @@ import 'package:staff_attendance_mobile/services/device_security_service.dart';
 import 'package:staff_attendance_mobile/services/trusted_clock.dart';
 
 class ApiRequestException implements Exception {
-  const ApiRequestException(this.statusCode, this.message);
+  const ApiRequestException(this.statusCode, this.message, {this.code});
 
   final int statusCode;
   final String message;
+
+  @override
+  String toString() => message;
+  final String? code;
+
+  @override
+  String toString() => message;
 
   @override
   String toString() => message;
@@ -55,6 +62,73 @@ class ApiService {
     if (response.statusCode != 200) {
       throw Exception(
         _responseMessage(data, 'Unable to check device approval.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> fetchDailyWorkStatus() async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/daily-work/status'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to load daily work reports.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> submitDailyWork({
+    required String completedPart,
+    required String description,
+    required String workStatus,
+    required List<String> photoPaths,
+    int? assignedTaskId,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/daily-work/submit'),
+    );
+    request.headers.addAll(await _getHeaders());
+    request.headers.remove('Content-Type');
+    request.fields.addAll({
+      'completed_part': completedPart,
+      'description': description,
+      'work_status': workStatus,
+      if (assignedTaskId != null) 'assigned_task_id': '$assignedTaskId',
+    });
+    for (final path in photoPaths) {
+      final extension = path.toLowerCase().split('.').last;
+      final mime = switch (extension) {
+        'jpg' || 'jpeg' => MediaType('image', 'jpeg'),
+        'png' => MediaType('image', 'png'),
+        'webp' => MediaType('image', 'webp'),
+        'heic' || 'heif' => MediaType('image', extension),
+        _ => throw ArgumentError.value(path, 'photoPaths'),
+      };
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'photos[]',
+          path,
+          filename: File(path).uri.pathSegments.last,
+          contentType: mime,
+        ),
+      );
+    }
+
+    final streamedResponse = await _client
+        .send(request)
+        .timeout(const Duration(seconds: 60));
+    final response = await http.Response.fromStream(streamedResponse);
+    final data = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Daily work submission failed.'),
       );
     }
     return data;
@@ -113,6 +187,7 @@ class ApiService {
       throw ApiRequestException(
         response.statusCode,
         _responseMessage(data, 'Field event sync failed.'),
+        code: data['code']?.toString(),
       );
     }
     return data;
@@ -527,9 +602,13 @@ class ApiService {
       return responseData;
     }
 
-    throw Exception(
-      responseData['message'] ??
-          'Attendance request failed (${response.statusCode}).',
+    throw ApiRequestException(
+      response.statusCode,
+      _responseMessage(
+        responseData,
+        'Attendance request failed (${response.statusCode}).',
+      ),
+      code: responseData['code']?.toString(),
     );
   }
 

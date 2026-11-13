@@ -41,8 +41,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _notificationTimer;
   String _buttonState = 'CHECK_IN';
   String? _role;
-  Map<String, dynamic>? _fieldStats;
   Map<String, dynamic>? _adminStats;
+  bool _keyRecoveryDialogVisible = false;
 
   @override
   void initState() {
@@ -64,7 +64,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _role ??= (await _apiService.fetchProfile()).role;
       }
       if (_role == 'admin' || _role == 'manager') {
-        await _loadFieldStatistics();
+        await _loadAdminStatistics();
         if (!mounted) return;
         setState(() {
           _loadError = null;
@@ -72,9 +72,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         });
         return;
       }
-      unawaited(_loadFieldStatistics());
       final data = await _apiService.fetchDashboardData();
       if (!mounted) return;
+      if (data.hasWorkSchedule) {
+        try {
+          await NotificationService().syncScheduleReminders(
+            startTime: data.shiftStartTime,
+            endTime: data.shiftEndTime,
+            workingDays: data.workingDays,
+          );
+        } catch (error) {
+          debugPrint('Could not update shift attendance reminders: $error');
+        }
+      }
       _clockNow = DateTime.now();
       _syncWorkedHoursTimer(data);
       setState(() {
@@ -100,18 +110,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _loadFieldStatistics() async {
+  Future<void> _loadAdminStatistics() async {
     try {
-      final fieldStats = _role == 'admin' || _role == 'manager'
-          ? null
-          : await _apiService.fetchFieldStats();
-      Map<String, dynamic>? adminStats;
-      if (_role == 'admin' || _role == 'manager') {
-        adminStats = await _apiService.fetchAdminFieldStats();
-      }
+      final adminStats = await _apiService.fetchAdminFieldStats();
       if (!mounted) return;
       setState(() {
-        if (fieldStats != null) _fieldStats = fieldStats;
         _adminStats = adminStats;
       });
     } catch (error) {
@@ -199,9 +202,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       if (!await DeviceSecurityService().canSign()) {
         throw Exception(
-          'Strong biometric authentication is not available. Set up strong '
-          'fingerprint or face biometrics in Android Settings, then retry. '
-          'Attendance was not submitted.',
+          'Set up a screen lock (Fingerprint, Face, PIN, Pattern, or Password) '
+          'in Android Settings, then try again. Attendance was not submitted.',
         );
       }
       if (!mounted) return;
@@ -264,7 +266,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       unawaited(_loadDashboardData(showLoading: false));
     } catch (errorMessage) {
       if (mounted) {
-        _showFeedbackSnackBar(_displayError(errorMessage));
+        if (_requiresKeyRecovery(errorMessage)) {
+          await _showKeyRecoveryGuidance(errorMessage.toString());
+        } else {
+          _showFeedbackSnackBar(_displayError(errorMessage));
+        }
       }
     } finally {
       if (mounted && _isSubmitting) {
@@ -334,6 +340,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  bool _requiresKeyRecovery(Object error) {
+    if (error is DeviceSecurityException) {
+      return error.code == 'DEVICE_NOT_ENROLLED' ||
+          error.code == 'KEY_INVALIDATED';
+    }
+    if (error is ApiRequestException &&
+        error.code == 'INVALID_DEVICE_PROOF') {
+      return true;
+    }
+    final message = error.toString().toLowerCase();
+    return message.contains('cryptographic proof could not be verified') ||
+        message.contains('no secure signing key') ||
+        message.contains('signing key is no longer available');
+  }
+
+  Future<void> _showKeyRecoveryGuidance(String error) async {
+    if (_keyRecoveryDialogVisible || !mounted) return;
+    _keyRecoveryDialogVisible = true;
+    try {
+      final goToSettings = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Signing key recovery required'),
+          content: Text(
+            'This device signing key could not be used to verify your request. '
+            'Recover the key in Settings before trying again.\n\n'
+            '${_displayError(error)}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Later'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Go to Settings'),
+            ),
+          ],
+        ),
+      );
+      if (goToSettings != true || !mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => ProfileSettingsScreen(apiService: _apiService),
+        ),
+      );
+    } finally {
+      _keyRecoveryDialogVisible = false;
+    }
+  }
+
   String _displayError(Object error) =>
       error.toString().replaceFirst(RegExp(r'^(Exception|StateError): '), '');
 
@@ -366,19 +423,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           : _isLoading && _currentStatus == null
           ? const Center(child: CircularProgressIndicator())
           : _currentStatus == null
-          ? SafeArea(
-              child: _fieldStats == null
-                  ? _buildLoadError()
-                  : ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(20),
-                      children: [
-                        _buildLoadError(),
-                        const SizedBox(height: 18),
-                        _buildEmployeeFieldStats(),
-                      ],
-                    ),
-            )
+          ? SafeArea(child: _buildLoadError())
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               child: ListView(
@@ -419,6 +464,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onAttendanceAction: _handleAttendanceAction,
                           isSubmitting: _isSubmitting,
                         ),
+                        if (_currentStatus!.hasWorkSchedule) ...[
+                          const SizedBox(height: 12),
+                          _buildShiftScheduleCard(_currentStatus!),
+                        ],
                       ],
                     ),
                   ),
@@ -465,8 +514,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             _buildNoAttendanceNotice(),
                           _buildStatisticsGrid(_currentStatus!.statistics!),
                         ],
-                        const SizedBox(height: 22),
-                        _buildEmployeeFieldStats(),
                       ],
                     ),
                   ),
@@ -493,6 +540,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             );
             return;
           }
+
           if (index == 1) {
             Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -544,51 +592,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildEmployeeFieldStats() {
-    final stats = _fieldStats;
-    if (stats == null) {
-      return const SizedBox.shrink();
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Field operations · ${stats['month'] ?? ''}',
-          style: const TextStyle(
-            color: Color(0xFF172033),
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
+  Widget _buildShiftScheduleCard(UserStatusModel status) {
+    final start = status.shiftStartTime;
+    final end = status.shiftEndTime;
+    final timeRange = start != null && end != null
+        ? '${start.substring(0, start.length >= 5 ? 5 : start.length)} - '
+            '${end.substring(0, end.length >= 5 ? 5 : end.length)}'
+        : null;
+    final days = status.workingDays
+        .map((day) => '${day[0].toUpperCase()}${day.substring(1)}')
+        .join(', ');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Shift: ${status.shiftName ?? 'Company schedule'}'
+                '${timeRange == null ? '' : ' ($timeRange)'}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _FieldStatCard(
-                title: 'Field hours',
-                value: '${stats['total_field_hours'] ?? 0}',
-                icon: Icons.work_history_outlined,
-              ),
+          if (days.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Working days: $days',
+              style: const TextStyle(color: Colors.white70),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _FieldStatCard(
-                title: 'Avg daily hrs',
-                value: '${stats['avg_daily_hours'] ?? 0}',
-                icon: Icons.schedule_outlined,
+          ],
+          if (!status.isWorkingDayToday) ...[
+            const SizedBox(height: 9),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _FieldStatCard(
-                title: 'Field visits',
-                value: '${stats['total_field_visits'] ?? 0}',
-                icon: Icons.location_on_outlined,
+              child: const Text(
+                'Scheduled Off Day Today',
+                style: TextStyle(
+                  color: Color(0xFF9A3412),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -880,7 +941,7 @@ Widget _buildNotificationBell() {
         crossAxisCount: 2,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
-        childAspectRatio: 0.88,
+        childAspectRatio: 0.78,
       ),
       children: [
         _DashboardStatCard(
@@ -891,6 +952,18 @@ Widget _buildNotificationBell() {
           detail:
               statistics.unavailableReasons['overtime'] ??
               'Based on completed shifts',
+          metrics: [
+            (
+              'Overtime Days',
+              statistics.overtimeDays == null
+                  ? '-'
+                  : '${statistics.overtimeDays}',
+            ),
+            (
+              'Before Time',
+              statistics.formatMinutes(statistics.beforeTimeMinutes),
+            ),
+          ],
         ),
         _DashboardStatCard(
           title: 'On-Time Rate & Hours',
@@ -905,6 +978,22 @@ Widget _buildNotificationBell() {
           reason: onTimeRate == null
               ? statistics.unavailableReasons['on_time_rate']
               : null,
+          metrics: [
+            (
+              'On-Time Days',
+              statistics.onTimeDays == null
+                  ? '-'
+                  : '${statistics.onTimeDays}',
+            ),
+            (
+              'On-Time Hours',
+              statistics.formatMinutes(statistics.standardWorkedMinutes),
+            ),
+            (
+              'Late Days',
+              statistics.lateDays == null ? '-' : '${statistics.lateDays}',
+            ),
+          ],
         ),
         _DashboardStatCard(
           title: 'Attendance Rate',
@@ -972,6 +1061,7 @@ class _DashboardStatCard extends StatelessWidget {
     required this.detail,
     this.reason,
     this.breakdown = const [],
+    this.metrics = const [],
   });
 
   final String title;
@@ -981,6 +1071,7 @@ class _DashboardStatCard extends StatelessWidget {
   final String? detail;
   final String? reason;
   final List<(String, String)> breakdown;
+  final List<(String, String)> metrics;
 
   @override
   Widget build(BuildContext context) {
@@ -1069,6 +1160,38 @@ class _DashboardStatCard extends StatelessWidget {
                   fontSize: 9,
                   height: 1.2,
                 ),
+              ),
+            ],
+            for (final item in metrics) ...[
+              const SizedBox(height: 3),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.$1,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      item.$2,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        color: Color(0xFF172033),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ] else ...[

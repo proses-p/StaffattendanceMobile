@@ -14,6 +14,12 @@ class UserStatusModel {
   final DateTime? checkOutAt;
   final bool isCheckedIn;
   final DashboardStatistics? statistics;
+  final String? shiftName;
+  final String? shiftStartTime;
+  final String? shiftEndTime;
+  final List<String> workingDays;
+  final bool isWorkingDayToday;
+  final bool hasWorkSchedule;
 
   UserStatusModel({
     required this.userName,
@@ -26,6 +32,12 @@ class UserStatusModel {
     required this.checkOutAt,
     required this.isCheckedIn,
     required this.statistics,
+    required this.shiftName,
+    required this.shiftStartTime,
+    required this.shiftEndTime,
+    required this.workingDays,
+    required this.isWorkingDayToday,
+    required this.hasWorkSchedule,
   });
 
   bool get hasCheckedIn =>
@@ -80,6 +92,16 @@ class UserStatusModel {
               Map<String, dynamic>.from(json['statistics'] as Map),
             )
           : null,
+      shiftName: json['shift_name']?.toString(),
+      shiftStartTime: json['start_time']?.toString(),
+      shiftEndTime: json['end_time']?.toString(),
+      workingDays: json['working_days'] is List
+          ? (json['working_days'] as List)
+              .map((day) => day.toString())
+              .toList()
+          : const [],
+      isWorkingDayToday: json['is_working_day_today'] == true,
+      hasWorkSchedule: json['has_work_schedule'] == true,
     );
   }
 

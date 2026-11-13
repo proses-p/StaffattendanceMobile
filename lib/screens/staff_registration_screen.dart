@@ -412,7 +412,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'This registration link is not valid. Contact the person who invited you for a new link.',
+            'This registration link is not valid. Contact your administrator who invited you for a new link.',
             textAlign: TextAlign.center,
             style: TextStyle(color: _muted, height: 1.5),
           ),

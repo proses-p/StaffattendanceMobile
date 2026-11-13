@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:staff_attendance_mobile/custom/sync_banner.dart';
 import 'package:staff_attendance_mobile/screens/expense_capture_screen.dart';
 import 'package:staff_attendance_mobile/screens/my_expenses_screen.dart';
+import 'package:staff_attendance_mobile/services/api_service.dart';
 import 'package:staff_attendance_mobile/services/field_expense_service.dart';
 import 'package:staff_attendance_mobile/services/field_service.dart';
 import 'package:staff_attendance_mobile/services/sync_service.dart';
@@ -31,6 +32,7 @@ class _FieldModeScreenState extends State<FieldModeScreen> {
   };
 
   late final FieldService _fieldService = widget.fieldService ?? FieldService();
+  final ApiService _apiService = ApiService();
   final _purposeController = TextEditingController();
   final _clientController = TextEditingController();
   Map<String, Object?>? _session;
@@ -41,6 +43,9 @@ class _FieldModeScreenState extends State<FieldModeScreen> {
   bool _checkingRemoteSession = true;
   bool _clockingOut = false;
   Object? _loadError;
+  Map<String, dynamic>? _fieldStats;
+  Object? _statsError;
+  bool _statsLoading = true;
 
   @override
   void initState() {
@@ -48,6 +53,25 @@ class _FieldModeScreenState extends State<FieldModeScreen> {
     (widget.initializeSync ?? SyncService.instance.initialize)();
     _loadLocalState();
     _restoreActiveSession();
+    _loadFieldStats();
+  }
+
+  Future<void> _loadFieldStats() async {
+    try {
+      final stats = await _apiService.fetchFieldStats();
+      if (!mounted) return;
+      setState(() {
+        _fieldStats = stats;
+        _statsError = null;
+        _statsLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _statsError = error;
+        _statsLoading = false;
+      });
+    }
   }
 
   Future<void> _restoreActiveSession() async {
@@ -218,6 +242,8 @@ class _FieldModeScreenState extends State<FieldModeScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
               children: [
+                _buildEmployeeFieldStats(),
+                const SizedBox(height: 16),
                 const SyncBanner(),
                 if (_loadError != null && !_checkingRemoteSession)
                   Container(
@@ -307,6 +333,77 @@ class _FieldModeScreenState extends State<FieldModeScreen> {
                 ],
               ],
             ),
+    );
+  }
+
+  Widget _buildEmployeeFieldStats() {
+    final stats = _fieldStats;
+    if (stats == null) {
+      return Card(
+        color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: _statsLoading
+              ? const Center(child: CircularProgressIndicator())
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Unable to load field statistics: $_statsError'),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _statsLoading = true;
+                          _statsError = null;
+                        });
+                        _loadFieldStats();
+                      },
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Field operations · ${stats['month'] ?? ''}',
+          style: const TextStyle(
+            color: Color(0xFF172033),
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _FieldStatCard(
+                title: 'Field hours',
+                value: '${stats['total_field_hours'] ?? 0}',
+                icon: Icons.work_history_outlined,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _FieldStatCard(
+                title: 'Avg daily hrs',
+                value: '${stats['avg_daily_hours'] ?? 0}',
+                icon: Icons.schedule_outlined,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _FieldStatCard(
+                title: 'Field visits',
+                value: '${stats['total_field_visits'] ?? 0}',
+                icon: Icons.location_on_outlined,
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -402,6 +499,50 @@ class _FieldModeScreenState extends State<FieldModeScreen> {
       title: Text(visit['client_name']!.toString()),
       subtitle: Text(
         '$time${visit['departed_at'] == null ? ' · Visit open' : ' · Departed'}',
+      ),
+    );
+  }
+}
+
+class _FieldStatCard extends StatelessWidget {
+  const _FieldStatCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE8EDF4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: const Color(0xFFFB923C)),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF172033),
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -178,12 +178,19 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
         try {
           response = await _api.syncBatch(events);
         } on DeviceSecurityException catch (error) {
-          if (error.code == 'DEVICE_NOT_ENROLLED') {
+          if (error.code == 'DEVICE_NOT_ENROLLED' ||
+              error.code == 'KEY_INVALIDATED') {
             _keyRecoveryRequired = true;
           }
           _lastError = error.message;
           break;
         } on ApiRequestException catch (error) {
+          if (error.code == 'INVALID_FIELD_SYNC_PROOF' ||
+              error.message.toLowerCase().contains('field sync proof')) {
+            _keyRecoveryRequired = true;
+            _lastError = error.message;
+            break;
+          }
           if (shouldKeepPendingAfterRequestFailure(error.statusCode)) {
             _lastError = error.message;
             break;
@@ -252,9 +259,12 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<void> recoverSigningKeyAndFlush(String currentPassword) async {
-    if (!_keyRecoveryRequired || !_online || _flushing || _recoveringKey) {
-      return;
+  Future<void> recoverSigningKeyAndFlush(
+    String currentPassword, {
+    ApiService? apiService,
+  }) async {
+    if (_flushing || _recoveringKey) {
+      throw StateError('A signing key recovery is already in progress.');
     }
 
     _recoveringKey = true;
@@ -262,12 +272,13 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
     var recovered = false;
     try {
-      await _api.recoverSyncSigningKey(currentPassword);
+      await (apiService ?? _api).recoverSyncSigningKey(currentPassword);
       _keyRecoveryRequired = false;
       _lastError = null;
       recovered = true;
     } catch (error) {
       _lastError = error.toString();
+      rethrow;
     } finally {
       _recoveringKey = false;
       _syncing = false;

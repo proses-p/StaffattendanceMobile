@@ -64,8 +64,96 @@ class NotificationService {
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
-    await NotificationStorage.addNotification(title, body);
 
+  }
+
+  Future<void> syncScheduleReminders({
+    required String? startTime,
+    required String? endTime,
+    required List<String> workingDays,
+  }) async {
+    for (final id in [1, 2, ...List.generate(14, (index) => 100 + index)]) {
+      await _notificationsPlugin.cancel(id: id);
+    }
+
+    final start = _parseTime(startTime);
+    final end = _parseTime(endTime);
+    if (start == null || end == null || workingDays.isEmpty) return;
+
+    const weekdayNumbers = {
+      'monday': DateTime.monday,
+      'tuesday': DateTime.tuesday,
+      'wednesday': DateTime.wednesday,
+      'thursday': DateTime.thursday,
+      'friday': DateTime.friday,
+      'saturday': DateTime.saturday,
+      'sunday': DateTime.sunday,
+    };
+    final weekdays = workingDays
+        .map((day) => weekdayNumbers[day.toLowerCase()])
+        .whereType<int>()
+        .toSet()
+        .toList()
+      ..sort();
+
+    for (final weekday in weekdays) {
+      await _scheduleWeeklyReminder(
+        id: 100 + ((weekday - 1) * 2),
+        title: 'Reminder of office check in',
+        body: 'Hello, remember to check in now, since you are near the office campus',
+        weekday: weekday,
+        hour: start.$1,
+        minute: start.$2,
+      );
+      await _scheduleWeeklyReminder(
+        id: 101 + ((weekday - 1) * 2),
+        title: 'Reminder of office check out',
+        body: 'Hi!, remember to check out',
+        weekday: weekday,
+        hour: end.$1,
+        minute: end.$2,
+      );
+    }
+  }
+
+  Future<void> _scheduleWeeklyReminder({
+    required int id,
+    required String title,
+    required String body,
+    required int weekday,
+    required int hour,
+    required int minute,
+  }) async {
+    await _notificationsPlugin.zonedSchedule(
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: _nextInstanceOfWeekdayTime(weekday, hour, minute),
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'attendance_channel_id',
+          'Attendance Reminders',
+          channelDescription: 'Vikumbusho vya kuingia na kutoka kazini',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+    );
+  }
+
+  (int, int)? _parseTime(String? time) {
+    if (time == null) return null;
+    final parts = time.split(':');
+    if (parts.length < 2) return null;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+    return (hour, minute);
   }
 
   // KAZI YA MAJARIBIO (Inalia baada ya sekunde 15 kuanzia sasa)
@@ -124,6 +212,18 @@ class NotificationService {
 
     if (scheduledDate.isBefore(now)) {
       scheduledDate = scheduledDate.add(const Duration(days: 1));
+    }
+    return scheduledDate;
+  }
+
+  tz.TZDateTime _nextInstanceOfWeekdayTime(int weekday, int hour, int minute) {
+    final now = tz.TZDateTime.now(tz.local);
+    var daysUntil = (weekday - now.weekday) % DateTime.daysPerWeek;
+    var scheduledDate =
+        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute)
+            .add(Duration(days: daysUntil));
+    if (!scheduledDate.isAfter(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 7));
     }
     return scheduledDate;
   }

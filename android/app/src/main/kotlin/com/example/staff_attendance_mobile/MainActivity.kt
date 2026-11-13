@@ -1,5 +1,6 @@
 package com.example.staff_attendance_mobile
 
+import android.app.KeyguardManager
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
@@ -41,17 +42,28 @@ class MainActivity : FlutterFragmentActivity() {
                 when (call.method) {
                     "canSign" -> {
                         try {
-                            val authenticators =
-                                BiometricManager.Authenticators.BIOMETRIC_STRONG
-                            result.success(
-                                BiometricManager.from(this).canAuthenticate(authenticators) ==
+                            val biometricManager = BiometricManager.from(this)
+                            val canSign = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                val authenticators =
+                                    BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                                        BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                                biometricManager.canAuthenticate(authenticators) ==
                                     BiometricManager.BIOMETRIC_SUCCESS
-                            )
+                            } else {
+                                val canAuthenticateBiometric =
+                                    biometricManager.canAuthenticate(
+                                        BiometricManager.Authenticators.BIOMETRIC_STRONG
+                                    ) == BiometricManager.BIOMETRIC_SUCCESS
+                                val keyguardManager =
+                                    getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+                                canAuthenticateBiometric || keyguardManager.isDeviceSecure
+                            }
+                            result.success(canSign)
                         } catch (error: Exception) {
                             logNativeFailure("canSign", error)
                             result.error(
                                 "BIOMETRIC_UNAVAILABLE",
-                                "Strong biometric authentication is unavailable.",
+                                "Set up a screen lock (Fingerprint, Face, PIN, Pattern, or Password) in Android Settings, then try again.",
                                 null
                             )
                         }
@@ -133,10 +145,11 @@ class MainActivity : FlutterFragmentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             builder.setUserAuthenticationParameters(
                 0,
-                KeyProperties.AUTH_BIOMETRIC_STRONG
+                KeyProperties.AUTH_BIOMETRIC_STRONG or
+                    KeyProperties.AUTH_DEVICE_CREDENTIAL
             )
         } else {
-            builder.setUserAuthenticationValidityDurationSeconds(-1)
+            builder.setUserAuthenticationValidityDurationSeconds(30)
         }
 
         generator.initialize(builder.build())
@@ -165,10 +178,11 @@ class MainActivity : FlutterFragmentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             builder.setUserAuthenticationParameters(
                 0,
-                KeyProperties.AUTH_BIOMETRIC_STRONG
+                KeyProperties.AUTH_BIOMETRIC_STRONG or
+                    KeyProperties.AUTH_DEVICE_CREDENTIAL
             )
         } else {
-            builder.setUserAuthenticationValidityDurationSeconds(-1)
+            builder.setUserAuthenticationValidityDurationSeconds(30)
         }
 
         generator.initialize(builder.build())
@@ -198,8 +212,9 @@ class MainActivity : FlutterFragmentActivity() {
                 KeyProperties.KEY_ALGORITHM_RSA -> "SHA256withRSA"
                 else -> throw InvalidKeyException("Unsupported signing key algorithm.")
             }
+            val usesCryptoObject = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
             val signature = Signature.getInstance(signatureAlgorithm)
-            signature.initSign(privateKey)
+            if (usesCryptoObject) signature.initSign(privateKey)
             val executor: Executor = ContextCompat.getMainExecutor(this)
             val prompt = BiometricPrompt(
                 this,
@@ -210,11 +225,14 @@ class MainActivity : FlutterFragmentActivity() {
                     ) {
                         completeOnce(completed) {
                             try {
-                                val authorizedSignature =
+                                val authorizedSignature = if (usesCryptoObject) {
                                     authenticationResult.cryptoObject?.signature
                                         ?: throw IllegalStateException(
-                                            "Biometric signing was not authorized."
+                                            "Secure signing was not authorized."
                                         )
+                                } else {
+                                    signature.apply { initSign(privateKey) }
+                                }
                                 authorizedSignature.update(message.toByteArray(Charsets.UTF_8))
                                 result.success(
                                     mapOf(
@@ -257,13 +275,23 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                 }
             )
-            val info = BiometricPrompt.PromptInfo.Builder()
+            val infoBuilder = BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Confirm attendance")
                 .setSubtitle("Authenticate to securely sign this attendance action")
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .setNegativeButtonText("Cancel")
-                .build()
-            prompt.authenticate(info, BiometricPrompt.CryptoObject(signature))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                infoBuilder.setAllowedAuthenticators(
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                        BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                )
+            } else {
+                infoBuilder.setDeviceCredentialAllowed(true)
+            }
+            val info = infoBuilder.build()
+            if (usesCryptoObject) {
+                prompt.authenticate(info, BiometricPrompt.CryptoObject(signature))
+            } else {
+                prompt.authenticate(info)
+            }
         } catch (error: Exception) {
             logNativeFailure("sign", error)
             completeOnce(completed) {
@@ -297,9 +325,9 @@ class MainActivity : FlutterFragmentActivity() {
             "BIOMETRIC_CANCELLED" ->
                 "Biometric confirmation was cancelled."
             "BIOMETRIC_NOT_ENROLLED" ->
-                "Set up a strong fingerprint or face biometric in Android Settings, then try again."
+                "Set up a screen lock (Fingerprint, Face, PIN, Pattern, or Password) in Android Settings, then try again."
             "BIOMETRIC_UNAVAILABLE" ->
-                "Strong biometric authentication is unavailable on this device. Try again later or use a supported device."
+                "Set up a screen lock (Fingerprint, Face, PIN, Pattern, or Password) in Android Settings, then try again."
             "BIOMETRIC_LOCKOUT" ->
                 "Biometric authentication is temporarily locked. Wait and try again."
             "BIOMETRIC_LOCKOUT_PERMANENT" ->

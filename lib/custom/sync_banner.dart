@@ -1,48 +1,70 @@
 import 'package:flutter/material.dart';
+import 'package:staff_attendance_mobile/screens/profile_settings_screen.dart';
 import 'package:staff_attendance_mobile/services/sync_service.dart';
 
-class SyncBanner extends StatelessWidget {
+class SyncBanner extends StatefulWidget {
   const SyncBanner({super.key});
 
-  Future<void> _recoverSigningKey(
-    BuildContext context,
-    SyncService sync,
-  ) async {
-    final controller = TextEditingController();
-    final currentPassword = await showDialog<String>(
+  @override
+  State<SyncBanner> createState() => _SyncBannerState();
+}
+
+class _SyncBannerState extends State<SyncBanner> {
+  bool _guidanceShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SyncService.instance.addListener(_handleSyncChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handleSyncChange());
+  }
+
+  @override
+  void dispose() {
+    SyncService.instance.removeListener(_handleSyncChange);
+    super.dispose();
+  }
+
+  void _handleSyncChange() {
+    final sync = SyncService.instance;
+    if (!sync.keyRecoveryRequired) {
+      _guidanceShown = false;
+      return;
+    }
+    if (!mounted || _guidanceShown) return;
+    _guidanceShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showKeyRecoveryGuidance();
+    });
+  }
+
+  Future<void> _showKeyRecoveryGuidance() async {
+    final goToSettings = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Recover secure signing key'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: true,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
-          decoration: const InputDecoration(
-            labelText: 'Current account password',
-          ),
+        title: const Text('Signing key recovery required'),
+        content: const Text(
+          'This device signing key could not be used to verify a secure request. '
+          'Recover the key in Settings to resume attendance and field sync.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Later'),
           ),
           FilledButton(
-            onPressed: () {
-              final password = controller.text;
-              if (password.isNotEmpty) {
-                Navigator.of(dialogContext).pop(password);
-              }
-            },
-            child: const Text('Recover'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Go to Settings'),
           ),
         ],
       ),
     );
-    controller.dispose();
-    if (currentPassword == null || !context.mounted) return;
-    await sync.recoverSigningKeyAndFlush(currentPassword);
+    if (goToSettings != true || !mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const ProfileSettingsScreen(),
+      ),
+    );
   }
 
   @override
@@ -134,13 +156,6 @@ class SyncBanner extends StatelessWidget {
                     );
                   },
                   child: const Text('Review'),
-                ),
-              if (sync.keyRecoveryRequired)
-                TextButton(
-                  onPressed: sync.online && !sync.syncing
-                      ? () => _recoverSigningKey(context, sync)
-                      : null,
-                  child: const Text('Recover key'),
                 ),
             ],
           ),
