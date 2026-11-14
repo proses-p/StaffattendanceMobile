@@ -476,10 +476,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     width: double.infinity,
                     decoration: const BoxDecoration(
                       color: primaryColor, // Vibrant Orange
-                      borderRadius: BorderRadius.only(
-                        bottomLeft: Radius.circular(32),
-                        bottomRight: Radius.circular(32),
-                      ),
+                      borderRadius: BorderRadius.circular(24),
                     ),
                     padding: const EdgeInsets.fromLTRB(
                       20,
