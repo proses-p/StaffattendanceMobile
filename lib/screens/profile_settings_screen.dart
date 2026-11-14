@@ -711,7 +711,7 @@ class _DeviceSecurityScreenState extends State<DeviceSecurityScreen> {
                 Text(
                   description,
                   style: const TextStyle(height: 1.45)
-                      .apply(bodyColor: Color(0xFF475569)),
+                      .apply(color: Color(0xFF475569)),
                 ),
               ],
             ),
