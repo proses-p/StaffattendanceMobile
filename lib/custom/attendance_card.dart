@@ -100,6 +100,35 @@ class _AttendanceCardState extends State<AttendanceCard> {
               ),
             ],
           ),
+          if (widget.status.isHolidayToday) ...[
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.celebration_outlined, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.status.holidayName?.trim().isNotEmpty == true
+                          ? 'Holiday Today: ${widget.status.holidayName}'
+                          : 'Company Holiday Today',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           CheckInButton(
             buttonState: widget.buttonState,

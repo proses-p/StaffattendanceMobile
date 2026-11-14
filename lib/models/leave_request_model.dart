@@ -8,6 +8,7 @@ class LeaveRequest {
     required this.status,
     required this.submittedAt,
     this.decisionNote,
+    this.leaveDays,
   });
 
   final int id;
@@ -18,6 +19,7 @@ class LeaveRequest {
   final String status;
   final DateTime? submittedAt;
   final String? decisionNote;
+  final int? leaveDays;
 
   factory LeaveRequest.fromJson(Map<String, dynamic> json) {
     final id = json['id'];
@@ -33,6 +35,7 @@ class LeaveRequest {
       reason: json['reason']?.toString() ?? '',
       status: _requiredString(json['status'], 'status'),
       decisionNote: json['decision_note']?.toString(),
+      leaveDays: json['leave_days'] is int ? json['leave_days'] as int : null,
       submittedAt: _optionalDate(json['submitted_at']),
     );
   }

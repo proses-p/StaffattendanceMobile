@@ -34,11 +34,15 @@ class AppNotification {
 }
 
 class NotificationStorage {
-  static const String _key = 'staff_app_notifications';
+  static const String _keyPrefix = 'staff_app_notifications_';
+  static const String _legacyKey = 'staff_app_notifications';
 
   // Hifadhi notification mpya
   static Future<void> addNotification(String title, String body) async {
     final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('auth_user_id');
+    if (userId == null) return;
+    final key = _keyFor(userId);
     final List<AppNotification> current = await getNotifications();
 
     current.insert(
@@ -53,13 +57,15 @@ class NotificationStorage {
     );
 
     final String encoded = jsonEncode(current.map((e) => e.toJson()).toList());
-    await prefs.setString(_key, encoded);
+    await prefs.setString(key, encoded);
   }
 
   // Leta notifications zote
   static Future<List<AppNotification>> getNotifications() async {
     final prefs = await SharedPreferences.getInstance();
-    final String? data = prefs.getString(_key);
+    final userId = prefs.getInt('auth_user_id');
+    if (userId == null) return [];
+    final String? data = prefs.getString(_keyFor(userId));
     if (data == null) return [];
 
     final List<dynamic> decoded = jsonDecode(data);
@@ -75,11 +81,27 @@ class NotificationStorage {
   // Ziweke zote kama zimesomwa mtu akifungua ukurasa
   static Future<void> markAllAsRead() async {
     final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('auth_user_id');
+    if (userId == null) return;
+    final key = _keyFor(userId);
     final list = await getNotifications();
     for (var n in list) {
       n.isRead = true;
     }
     final String encoded = jsonEncode(list.map((e) => e.toJson()).toList());
-    await prefs.setString(_key, encoded);
+    await prefs.setString(key, encoded);
+  }
+
+  static Future<void> clearForUser(int userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyFor(userId));
+    await prefs.remove(_legacyKey);
+  }
+
+  static String _keyFor(int userId) => '$_keyPrefix$userId';
+
+  static Future<void> clearLegacyNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_legacyKey);
   }
 }

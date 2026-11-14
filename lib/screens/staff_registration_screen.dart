@@ -26,6 +26,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _authService = AuthService();
@@ -41,6 +42,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
@@ -58,6 +60,9 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
       await _authService.registerStaff(
         token: widget.token,
         name: _nameController.text,
+        phone: _phoneController.text.trim().isEmpty
+            ? null
+            : _phoneController.text.trim(),
         password: _passwordController.text,
         confirmPassword: _confirmPasswordController.text,
       );
@@ -262,6 +267,25 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Enter your full name.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 18),
+                _fieldLabel('Phone number (optional)'),
+                TextFormField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  textInputAction: TextInputAction.next,
+                  maxLength: 30,
+                  autofillHints: const [AutofillHints.telephoneNumber],
+                  decoration: _inputDecoration(
+                    hint: 'Enter your phone number',
+                    icon: Icons.phone_outlined,
+                  ),
+                  validator: (value) {
+                    if ((value?.trim().length ?? 0) > 30) {
+                      return 'Phone number must be 30 characters or fewer.';
                     }
                     return null;
                   },

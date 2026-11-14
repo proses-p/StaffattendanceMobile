@@ -227,18 +227,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             _ProfileInfoRow(
                               icon: Icons.phone_outlined,
                               label: 'Phone number',
-                              value: _displayValue(profile.phone),
+                              value: profile.phone ?? 'Not added yet',
                             ),
                             _ProfileInfoRow(
                               icon: Icons.business_outlined,
-                              label: 'Organization',
+                              label: 'Organization / Company',
                               value: _displayValue(profile.organization),
                             ),
-                            _ProfileInfoRow(
-                              icon: Icons.badge_outlined,
-                              label: 'Employee ID',
-                              value: _displayValue(profile.employeeId),
-                            ),
+                            if (profile.shiftName != null)
+                              _ProfileInfoRow(
+                                icon: Icons.schedule_outlined,
+                                label: 'Assigned shift',
+                                value: profile.shiftName!,
+                              ),
                             if (profile.createdAt != null)
                               _ProfileInfoRow(
                                 icon: Icons.calendar_month_outlined,
@@ -463,16 +464,6 @@ class _ProfileHeader extends StatelessWidget {
                       color: Colors.white,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-                if (profile.employeeId?.isNotEmpty == true) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    'ID: ${profile.employeeId}',
-                    style: const TextStyle(
-                      color: Color(0xFFFFF7ED),
-                      fontSize: 12,
                     ),
                   ),
                 ],

@@ -99,7 +99,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Your organization manages your email and employee identity.',
+                    'Your organization manages your email address and account details.',
                     style: TextStyle(
                       color: Color(0xFF64748B),
                       height: 1.45,
@@ -107,11 +107,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   const SizedBox(height: 22),
                   _ReadOnlyField(label: 'Email address', value: widget.profile.email),
-                  const SizedBox(height: 16),
-                  _ReadOnlyField(
-                    label: 'Employee ID',
-                    value: widget.profile.employeeId ?? 'Not provided',
-                  ),
                   const SizedBox(height: 20),
                   TextFormField(
                     controller: _nameController,

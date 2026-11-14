@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
 
 class DailyWorkSubmissionScreen extends StatefulWidget {
@@ -28,11 +29,14 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
   Object? _loadError;
   bool _loading = true;
   bool _submitting = false;
+  bool _draftingWithAi = false;
+  Map<String, String> _photoHeaders = const {};
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadPhotoHeaders();
   }
 
   @override
@@ -80,6 +84,39 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
     }
   }
 
+  Future<void> _loadPhotoHeaders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (!mounted || token == null || token.trim().isEmpty) return;
+    setState(() {
+      _photoHeaders = {
+        'Authorization': 'Bearer ${token.trim()}',
+        'Accept': 'image/*',
+      };
+    });
+  }
+
+  Uri _resolvePhotoUri(String value) {
+    final photoUri = Uri.parse(value);
+    final apiUri = Uri.parse(ApiService.baseUrl);
+    final cleanPath = photoUri.path.replaceFirst(
+      RegExp(r'^/?(?:storage/)+'),
+      '',
+    );
+    final storagePath = '/storage/$cleanPath';
+
+    if (photoUri.hasScheme) {
+      return photoUri.replace(path: storagePath);
+    }
+
+    return Uri(
+      scheme: apiUri.scheme,
+      host: apiUri.host,
+      port: apiUri.hasPort ? apiUri.port : null,
+      path: storagePath,
+    );
+  }
+
   Future<void> _capturePhoto() async {
     try {
       final photo = await _picker.pickImage(
@@ -125,6 +162,138 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  Future<void> _draftWithAi() async {
+    if (_draftingWithAi) return;
+    final notesController = TextEditingController();
+    var dialogBusy = false;
+    var dialogClosed = false;
+    String? dialogError;
+    String? selectedTaskTitle;
+    for (final task in _tasks) {
+      final taskId = task['id'] is int
+          ? task['id'] as int
+          : int.tryParse(task['id']?.toString() ?? '');
+      if (taskId == _assignedTaskId) {
+        selectedTaskTitle = task['title']?.toString();
+        break;
+      }
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Draft with AI'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Briefly note what you did. Review the draft before submitting.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: notesController,
+                autofocus: true,
+                minLines: 3,
+                maxLines: 6,
+                maxLength: 500,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  hintText: 'e.g., installed 3 routers at Mikocheni',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (dialogError != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  dialogError!,
+                  style: const TextStyle(color: Color(0xFFB91C1C)),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: dialogBusy
+                  ? null
+                  : () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: dialogBusy
+                  ? null
+                  : () async {
+                      final notes = notesController.text.trim();
+                      if (notes.isEmpty) {
+                        setDialogState(
+                          () => dialogError =
+                              'Enter a few notes about your work.',
+                        );
+                        return;
+                      }
+                      setDialogState(() {
+                        dialogBusy = true;
+                        dialogError = null;
+                      });
+                      if (mounted) setState(() => _draftingWithAi = true);
+                      try {
+                        final draft = await widget.apiService
+                            .draftDailyWorkReport(
+                              roughNotes: notes,
+                              assignedTaskTitle: selectedTaskTitle,
+                            );
+                        final completedPart =
+                            draft['completed_part']?.toString().trim() ?? '';
+                        final description =
+                            draft['description']?.toString().trim() ?? '';
+                        if (completedPart.isEmpty || description.isEmpty) {
+                          throw Exception(
+                            'The AI returned an incomplete report draft.',
+                          );
+                        }
+                        if (!mounted) return;
+                        setState(() {
+                          _completedPartController.text = completedPart;
+                          _descriptionController.text = description;
+                        });
+                        Navigator.of(dialogContext).pop();
+                        dialogClosed = true;
+                        _showMessage(
+                          'AI draft filled in. Review it before submitting.',
+                        );
+                      } catch (error) {
+                        setDialogState(() {
+                          dialogError = error.toString().replaceFirst(
+                            'Exception: ',
+                            '',
+                          );
+                        });
+                      } finally {
+                        if (mounted) {
+                          setState(() => _draftingWithAi = false);
+                        }
+                        if (!dialogClosed) {
+                          setDialogState(() => dialogBusy = false);
+                        }
+                      }
+                    },
+              icon: dialogBusy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_awesome, size: 18),
+              label: Text(dialogBusy ? 'Drafting…' : 'Create draft'),
+            ),
+          ],
+        ),
+      ),
+    );
+    notesController.dispose();
   }
 
   void _showMessage(String message) {
@@ -197,7 +366,7 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
                     _buildForm(isRevision: true),
                   ] else if (isLocked) ...[
                     const _SectionHeading(title: 'Today’s submission'),
-                    _submissionCard(today!),
+                    _submissionCard(today),
                   ] else ...[
                     const _SectionHeading(title: 'Today’s work report'),
                     _buildForm(),
@@ -221,7 +390,10 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
     return Card(
       color: selected ? const Color(0xFFFFF7ED) : Colors.white,
       child: ListTile(
-        leading: const Icon(Icons.assignment_outlined, color: Color(0xFFEA580C)),
+        leading: const Icon(
+          Icons.assignment_outlined,
+          color: Color(0xFFEA580C),
+        ),
         title: Text(task['title']?.toString() ?? 'Assigned task'),
         subtitle: Text(
           [
@@ -255,6 +427,35 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Work report details',
+                      style: TextStyle(
+                        color: Color(0xFF172033),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _draftingWithAi ? null : _draftWithAi,
+                    icon: _draftingWithAi
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome, size: 17),
+                    label: const Text('Draft with AI ✨'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFB45309),
+                      side: const BorderSide(color: Color(0xFFFED7AA)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
               if (_tasks.isNotEmpty) ...[
                 DropdownButtonFormField<int?>(
                   initialValue: _assignedTaskId,
@@ -327,7 +528,10 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
                     value: 'in_progress',
                     child: Text('In Progress'),
                   ),
-                  DropdownMenuItem(value: 'blocked', child: Text('Needs Support / Blocked')),
+                  DropdownMenuItem(
+                    value: 'blocked',
+                    child: Text('Needs Support / Blocked'),
+                  ),
                 ],
                 onChanged: (value) {
                   if (value != null) setState(() => _workStatus = value);
@@ -345,7 +549,9 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
                   OutlinedButton.icon(
                     onPressed: _capturePhoto,
                     icon: const Icon(Icons.camera_alt_outlined),
-                    label: Text(_photos.isEmpty ? 'Add Photo' : 'Add New Picture'),
+                    label: Text(
+                      _photos.isEmpty ? 'Add Photo' : 'Add New Picture',
+                    ),
                   ),
                 ],
               ),
@@ -410,7 +616,11 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : Text(isRevision ? 'Submit Revised Report' : 'Submit Daily Report'),
+                      : Text(
+                          isRevision
+                              ? 'Submit Revised Report'
+                              : 'Submit Daily Report',
+                        ),
                 ),
               ),
             ],
@@ -425,6 +635,8 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
       submission: submission,
       statusLabel: _reviewStatusLabel(submission['review_status']),
       statusColor: _reviewStatusColor(submission['review_status']),
+      photoHeaders: _photoHeaders,
+      resolvePhotoUri: _resolvePhotoUri,
     );
   }
 
@@ -435,6 +647,8 @@ class _DailyWorkSubmissionScreenState extends State<DailyWorkSubmissionScreen> {
         submission: submission,
         statusLabel: _reviewStatusLabel(submission['review_status']),
         statusColor: _reviewStatusColor(submission['review_status']),
+        photoHeaders: _photoHeaders,
+        resolvePhotoUri: _resolvePhotoUri,
       ),
     );
   }
@@ -482,11 +696,15 @@ class _ReportCard extends StatelessWidget {
     required this.submission,
     required this.statusLabel,
     required this.statusColor,
+    required this.photoHeaders,
+    required this.resolvePhotoUri,
   });
 
   final Map<String, dynamic> submission;
   final String statusLabel;
   final Color statusColor;
+  final Map<String, String> photoHeaders;
+  final Uri Function(String) resolvePhotoUri;
 
   @override
   Widget build(BuildContext context) {
@@ -542,10 +760,7 @@ class _ReportCard extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               submission['completed_part']?.toString() ?? '',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
@@ -557,7 +772,8 @@ class _ReportCard extends StatelessWidget {
               'Work status: ${(submission['work_status'] ?? '').toString().replaceAll('_', ' ')}',
               style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
             ),
-            if (submission['admin_feedback']?.toString().isNotEmpty == true) ...[
+            if (submission['admin_feedback']?.toString().isNotEmpty ==
+                true) ...[
               const SizedBox(height: 12),
               _MessageCard(
                 message: 'Admin feedback: ${submission['admin_feedback']}',
@@ -577,13 +793,35 @@ class _ReportCard extends StatelessWidget {
                     if (url == null || url.isEmpty) {
                       return const SizedBox.shrink();
                     }
+                    final photoUri = resolvePhotoUri(url);
+                    final apiUri = Uri.parse(ApiService.baseUrl);
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Image.network(
-                        url,
+                        photoUri.toString(),
                         width: 96,
                         height: 86,
                         fit: BoxFit.cover,
+                        headers:
+                            photoUri.scheme == apiUri.scheme &&
+                                photoUri.host == apiUri.host &&
+                                photoUri.port == apiUri.port
+                            ? photoHeaders
+                            : null,
+                        loadingBuilder: (_, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Container(
+                            width: 96,
+                            height: 86,
+                            color: const Color(0xFFF1F5F9),
+                            alignment: Alignment.center,
+                            child: const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          );
+                        },
                         errorBuilder: (_, _, _) => Container(
                           width: 96,
                           height: 86,

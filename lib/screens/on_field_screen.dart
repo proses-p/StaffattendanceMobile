@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -51,10 +52,19 @@ class _OnFieldScreenState extends State<OnFieldScreen> {
     });
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
         mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Unable to open the map.')));
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Unable to open the map.')),
+        );
     }
+  }
+
+  String _startTime(Object? value) {
+    final start = DateTime.tryParse(value?.toString() ?? '');
+    return start == null
+        ? 'Start time unavailable'
+        : DateFormat('d MMM yyyy · h:mm a').format(start.toLocal());
   }
 
   @override
@@ -66,11 +76,36 @@ class _OnFieldScreenState extends State<OnFieldScreen> {
         foregroundColor: const Color(0xFF172033),
         elevation: 0,
         title: const Text('Currently on field'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _loading ? null : _load,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null && _rows.isEmpty
-          ? Center(child: Text('Unable to load on-field staff: $_error'))
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Unable to load on-field staff: $_error',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: _load,
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : RefreshIndicator(
               onRefresh: _load,
               child: _rows.isEmpty
@@ -80,35 +115,124 @@ class _OnFieldScreenState extends State<OnFieldScreen> {
                         Center(child: Text('No staff are currently on field.')),
                       ],
                     )
-                  : ListView.builder(
+                  : ListView(
                       padding: const EdgeInsets.all(12),
-                      itemCount: _rows.length,
-                      itemBuilder: (context, index) {
-                        final row = _rows[index];
-                        return Card(
-                          color: Colors.white,
-                          child: ListTile(
-                            onTap: () => _openMap(row),
-                            leading: Icon(
-                              row['is_flagged'] == true
-                                  ? Icons.flag
-                                  : Icons.person_pin_circle_outlined,
-                              color: row['is_flagged'] == true
-                                  ? Colors.red
-                                  : const Color(0xFFFB923C),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
+                          child: Text(
+                            '${_rows.length} active ${_rows.length == 1 ? 'visit' : 'visits'}',
+                            style: const TextStyle(
+                              color: Color(0xFF64748B),
+                              fontWeight: FontWeight.w600,
                             ),
-                            title: Text(row['name']?.toString() ?? 'Staff'),
-                            subtitle: Text(
-                              '${row['task_type']} · ${row['last_seen_at'] ?? 'Location unavailable'}\n'
-                              '${row['latitude'] ?? '-'}, ${row['longitude'] ?? '-'}',
-                            ),
-                            isThreeLine: true,
-                            trailing: const Icon(Icons.map_outlined),
                           ),
-                        );
-                      },
+                        ),
+                        ..._rows.map(_visitCard),
+                      ],
                     ),
             ),
+    );
+  }
+
+  Widget _visitCard(Map<String, dynamic> row) {
+    final hasLocation =
+        row['latitude'] != null && row['longitude'] != null;
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const CircleAvatar(
+                  backgroundColor: Color(0xFFFFF1E6),
+                  child: Icon(
+                    Icons.person_pin_circle_outlined,
+                    color: Color(0xFFFB923C),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        row['name']?.toString() ?? 'Staff',
+                        style: const TextStyle(
+                          color: Color(0xFF172033),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        row['client_or_service_name']?.toString() ??
+                            'Field Visit',
+                        style: const TextStyle(
+                          color: Color(0xFF334155),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _detail('Purpose', row['purpose']?.toString() ?? 'Not provided'),
+            _detail('Started', _startTime(row['clock_in_at'])),
+            const SizedBox(height: 8),
+            if (hasLocation)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => _openMap(row),
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: const Text('View Location on Google Maps'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF0E7490),
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              )
+            else
+              const Text(
+                'Location unavailable',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detail(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(color: Color(0xFF334155), fontSize: 13),
+          ),
+        ],
+      ),
     );
   }
 }

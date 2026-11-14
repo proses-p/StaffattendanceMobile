@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:staff_attendance_mobile/models/dashboard_statistics_model.dart';
@@ -74,16 +76,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       final data = await _apiService.fetchDashboardData();
       if (!mounted) return;
-      if (data.hasWorkSchedule) {
-        try {
-          await NotificationService().syncScheduleReminders(
-            startTime: data.shiftStartTime,
-            endTime: data.shiftEndTime,
-            workingDays: data.workingDays,
-          );
-        } catch (error) {
-          debugPrint('Could not update shift attendance reminders: $error');
-        }
+      try {
+        await NotificationService().syncScheduleReminders(
+          startTime: data.shiftStartTime ?? '08:00',
+          endTime: data.shiftEndTime ?? '17:00',
+          workingDays: data.hasWorkSchedule
+              ? data.workingDays
+              : const [
+                  'monday',
+                  'tuesday',
+                  'wednesday',
+                  'thursday',
+                  'friday',
+                  'saturday',
+                  'sunday',
+                ],
+          isHolidayToday: data.isHolidayToday,
+        );
+      } catch (error) {
+        debugPrint('Could not update shift attendance reminders: $error');
       }
       _clockNow = DateTime.now();
       _syncWorkedHoursTimer(data);
@@ -157,6 +168,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final items = await _apiService.fetchUnreadNotifications();
       if (items.isEmpty) return;
+      final preferences = await SharedPreferences.getInstance();
+      final showAdminUpdateAlerts =
+          preferences.getBool('admin_updates_enabled') ?? true;
 
       for (var item in items) {
         final String title = item['title']?.toString() ?? 'Taarifa Mpya';
@@ -168,12 +182,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // 1. Hifadhi kwenye kengele ya ndani ya App (Badge itaongezeka!)
         await NotificationStorage.addNotification(title, body);
 
-        // 2. Piga mlio wa notification juu ya screen ya simu
-        await NotificationService().showInstantNotification(
-          id: id,
-          title: title,
-          body: body,
-        );
+        if (showAdminUpdateAlerts) {
+          await NotificationService().showInstantNotification(
+            id: id,
+            title: title,
+            body: body,
+          );
+        }
       }
 
       // Onyesha mabadiliko kwenye icon ya kengele (Badge namba ionekane)
@@ -391,8 +406,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  String _displayError(Object error) =>
-      error.toString().replaceFirst(RegExp(r'^(Exception|StateError): '), '');
+  String _displayError(Object error) {
+    var message = error.toString().trim();
+    final prefix = RegExp(
+      r'^(?:(?:[A-Za-z]*Exception|StateError)\s*:\s*|Error\s+\d{3}\s*:\s*|Error\s*:\s*|Status(?:\s+code)?\s*:\s*\d{3}\s*\|\s*|HTTP\s+\d{3}\s*:\s*|\d{3}\s*:\s*)',
+      caseSensitive: false,
+    );
+    while (prefix.hasMatch(message)) {
+      message = message.replaceFirst(prefix, '').trim();
+    }
+    return message;
+  }
 
   void _showFeedbackSnackBar(String message, {bool isSuccess = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -408,14 +432,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFFFB923C);
 
-    // Set status bar icons to light (white) to match the orange background header
-    SystemChrome.setSystemUIOverlayStyle(
-      const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light,
-      ),
-    );
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: _role == 'admin' || _role == 'manager'
@@ -430,6 +446,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.zero,
                 children: [
+                  AnnotatedRegion<SystemUiOverlayStyle>(
+                    value: const SystemUiOverlayStyle(
+                      statusBarColor: Colors.white,
+                      statusBarIconBrightness: Brightness.dark,
+                      statusBarBrightness: Brightness.light,
+                    ),
+                    child: Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        MediaQuery.of(context).padding.top + 10,
+                        20,
+                        14,
+                      ),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        border: Border(
+                          bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                        ),
+                      ),
+                      child: _buildHeroHeader(_currentStatus!.userName),
+                    ),
+                  ),
                   // ===================================================
                   // EXTENDED ORANGE HERO CONTAINER (Top to Attendance Card)
                   // ===================================================
@@ -442,17 +481,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         bottomRight: Radius.circular(32),
                       ),
                     ),
-                    padding: EdgeInsets.only(
-                      top: MediaQuery.of(context).padding.top + 16,
-                      left: 20,
-                      right: 20,
-                      bottom: 28,
+                    padding: const EdgeInsets.fromLTRB(
+                      20,
+                      18,
+                      20,
+                      28,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildHeroHeader(_currentStatus!.userName),
-                        const SizedBox(height: 18),
                         if (_loadError != null) ...[
                           _buildInlineError(),
                           const SizedBox(height: 14),
@@ -513,6 +550,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           if (!_currentStatus!.statistics!.hasAttendanceHistory)
                             _buildNoAttendanceNotice(),
                           _buildStatisticsGrid(_currentStatus!.statistics!),
+                        ],
+                        if (_currentStatus!.officeLatitude != null &&
+                            _currentStatus!.officeLongitude != null) ...[
+                          const SizedBox(height: 16),
+                          _buildOfficeGeofenceMap(_currentStatus!),
                         ],
                       ],
                     ),
@@ -733,14 +775,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Header styled specifically for the Orange Hero Background (white text & icons)
   Widget _buildHeroHeader(String userName) {
     return Row(
       children: [
-        CircleAvatar(
-          radius: 22,
-          backgroundColor: Colors.white.withOpacity(0.25),
-          child: const Icon(Icons.person, color: Colors.white),
+        InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => const ProfileScreen(),
+            ),
+          ),
+          child: CircleAvatar(
+            radius: 22,
+            backgroundColor: const Color(0xFFFFF7ED),
+            child: Text(
+              userName.trim().isEmpty ? 'S' : userName.trim()[0].toUpperCase(),
+              style: const TextStyle(
+                color: Color(0xFFEA580C),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -754,20 +809,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: Color(0xFF0F172A),
                 ),
               ),
               const SizedBox(height: 2),
               const Text(
                 'Have a productive day',
-                style: TextStyle(fontSize: 12, color: Colors.white70),
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               ),
             ],
           ),
         ),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.2),
+            color: Color(0xFFF1F5F9),
             shape: BoxShape.circle,
           ),
           child: _buildNotificationBell(),
@@ -795,7 +850,11 @@ Widget _buildNotificationBell() {
           isLabelVisible: unreadCount > 0,
           label: Text('$unreadCount'),
           backgroundColor: Colors.red,
-          child: const Icon(Icons.notifications_outlined, size: 28),
+          child: const Icon(
+            Icons.notifications_outlined,
+            size: 28,
+            color: Color(0xFF1E293B),
+          ),
         ),
       );
     },
@@ -856,7 +915,9 @@ Widget _buildNotificationBell() {
             ),
             const SizedBox(height: 8),
             Text(
-              _loadError ?? 'Please try again.',
+              _loadError == null
+                  ? 'Please try again.'
+                  : _displayError(_loadError!),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Color(0xFF64748B)),
             ),
@@ -1034,6 +1095,108 @@ Widget _buildNotificationBell() {
               statistics.unavailableReasons['incomplete_days'],
         ),
       ],
+    );
+  }
+
+  Widget _buildOfficeGeofenceMap(UserStatusModel status) {
+    final latitude = status.officeLatitude!;
+    final longitude = status.officeLongitude!;
+    final radius = status.geofenceRadiusMeters ?? 30;
+    final officePoint = LatLng(latitude, longitude);
+    final label = status.officeName?.trim().isNotEmpty == true
+        ? status.officeName!.trim()
+        : 'Office Check-In Zone';
+
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(19),
+        border: Border.all(color: const Color(0xFFE8EDF4)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x080F172A),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.location_on_outlined,
+                  color: Color(0xFF0284C7),
+                  size: 19,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    '$label (${radius.toStringAsFixed(0)}m radius)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF172033),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 190,
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: officePoint,
+                initialZoom: 18,
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'staff_attendance_mobile',
+                ),
+                CircleLayer(
+                  circles: [
+                    CircleMarker(
+                      point: officePoint,
+                      radius: radius,
+                      useRadiusInMeter: true,
+                      color: Colors.blue.withOpacity(0.22),
+                      borderColor: Colors.blue,
+                      borderStrokeWidth: 2,
+                    ),
+                  ],
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: officePoint,
+                      width: 40,
+                      height: 48,
+                      child: const Icon(
+                        Icons.location_pin,
+                        color: Color(0xFFDC2626),
+                        size: 42,
+                      ),
+                    ),
+                  ],
+                ),
+                const RichAttributionWidget(
+                  attributions: [
+                    TextSourceAttribution('© OpenStreetMap contributors'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

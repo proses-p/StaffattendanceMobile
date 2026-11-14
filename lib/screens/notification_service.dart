@@ -1,4 +1,5 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:staff_attendance_mobile/services/notification_storage.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -11,6 +12,11 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
+  static const _dailyRemindersKey = 'daily_attendance_reminders_enabled';
+  static const _scheduledStartKey = 'attendance_reminder_start_time';
+  static const _scheduledEndKey = 'attendance_reminder_end_time';
+  static const _scheduledDaysKey = 'attendance_reminder_working_days';
+  static const _scheduledHolidayKey = 'attendance_reminder_is_holiday_today';
 
   Future<void> init() async {
     // 1. Anzisha Timezone ya Tanzania (Africa/Dar_es_Salaam)
@@ -46,6 +52,11 @@ class NotificationService {
     required int hour,
     required int minute,
   }) async {
+    if (!await dailyRemindersEnabled()) {
+      await _notificationsPlugin.cancel(id: id);
+      return;
+    }
+
     await _notificationsPlugin.zonedSchedule(
       id: id,
       title: title,
@@ -67,18 +78,89 @@ class NotificationService {
 
   }
 
+  Future<bool> dailyRemindersEnabled() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_dailyRemindersKey) ?? true;
+  }
+
+  Future<void> setDailyRemindersEnabled(bool enabled) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_dailyRemindersKey, enabled);
+
+    if (!enabled) {
+      for (final id in [1, 2, ...List.generate(14, (index) => 100 + index)]) {
+        await _notificationsPlugin.cancel(id: id);
+      }
+      return;
+    }
+
+    final startTime = preferences.getString(_scheduledStartKey);
+    final endTime = preferences.getString(_scheduledEndKey);
+    final workingDays = preferences.getStringList(_scheduledDaysKey);
+    if (startTime != null && endTime != null && workingDays != null) {
+      await syncScheduleReminders(
+        startTime: startTime,
+        endTime: endTime,
+        workingDays: workingDays,
+        isHolidayToday:
+            preferences.getBool(_scheduledHolidayKey) ?? false,
+      );
+    } else {
+      await scheduleDailyReminder(
+        id: 1,
+        title: 'Reminder of office check in',
+        body: 'Hello, remember to check in now, since you are near the office campus',
+        hour: 8,
+        minute: 0,
+      );
+      await scheduleDailyReminder(
+        id: 2,
+        title: 'Reminder of office check out',
+        body: 'Hi!, remember to check out',
+        hour: 17,
+        minute: 0,
+      );
+    }
+  }
+
   Future<void> syncScheduleReminders({
     required String? startTime,
     required String? endTime,
     required List<String> workingDays,
+    bool isHolidayToday = false,
   }) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_scheduledStartKey, startTime ?? '');
+    await preferences.setString(_scheduledEndKey, endTime ?? '');
+    await preferences.setStringList(_scheduledDaysKey, workingDays);
+    await preferences.setBool(_scheduledHolidayKey, isHolidayToday);
+
     for (final id in [1, 2, ...List.generate(14, (index) => 100 + index)]) {
       await _notificationsPlugin.cancel(id: id);
     }
 
+    if (!await dailyRemindersEnabled()) return;
+
     final start = _parseTime(startTime);
     final end = _parseTime(endTime);
-    if (start == null || end == null || workingDays.isEmpty) return;
+    if (start == null || end == null) return;
+    if (workingDays.isEmpty) {
+      await scheduleDailyReminder(
+        id: 1,
+        title: 'Reminder of office check in',
+        body: 'Hello, remember to check in now, since you are near the office campus',
+        hour: start.$1,
+        minute: start.$2,
+      );
+      await scheduleDailyReminder(
+        id: 2,
+        title: 'Reminder of office check out',
+        body: 'Hi!, remember to check out',
+        hour: end.$1,
+        minute: end.$2,
+      );
+      return;
+    }
 
     const weekdayNumbers = {
       'monday': DateTime.monday,
@@ -104,6 +186,8 @@ class NotificationService {
         weekday: weekday,
         hour: start.$1,
         minute: start.$2,
+        skipToday:
+            isHolidayToday && weekday == tz.TZDateTime.now(tz.local).weekday,
       );
       await _scheduleWeeklyReminder(
         id: 101 + ((weekday - 1) * 2),
@@ -112,6 +196,8 @@ class NotificationService {
         weekday: weekday,
         hour: end.$1,
         minute: end.$2,
+        skipToday:
+            isHolidayToday && weekday == tz.TZDateTime.now(tz.local).weekday,
       );
     }
   }
@@ -123,12 +209,18 @@ class NotificationService {
     required int weekday,
     required int hour,
     required int minute,
+    bool skipToday = false,
   }) async {
     await _notificationsPlugin.zonedSchedule(
       id: id,
       title: title,
       body: body,
-      scheduledDate: _nextInstanceOfWeekdayTime(weekday, hour, minute),
+      scheduledDate: _nextInstanceOfWeekdayTime(
+        weekday,
+        hour,
+        minute,
+        skipToday: skipToday,
+      ),
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           'attendance_channel_id',
@@ -216,9 +308,17 @@ class NotificationService {
     return scheduledDate;
   }
 
-  tz.TZDateTime _nextInstanceOfWeekdayTime(int weekday, int hour, int minute) {
+  tz.TZDateTime _nextInstanceOfWeekdayTime(
+    int weekday,
+    int hour,
+    int minute, {
+    bool skipToday = false,
+  }) {
     final now = tz.TZDateTime.now(tz.local);
     var daysUntil = (weekday - now.weekday) % DateTime.daysPerWeek;
+    if (skipToday && daysUntil == 0) {
+      daysUntil = DateTime.daysPerWeek;
+    }
     var scheduledDate =
         tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute)
             .add(Duration(days: daysUntil));

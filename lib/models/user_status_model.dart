@@ -1,4 +1,3 @@
-
 import 'dashboard_statistics_model.dart';
 
 const _emptyAttendanceTime = '--:-- --';
@@ -20,6 +19,12 @@ class UserStatusModel {
   final List<String> workingDays;
   final bool isWorkingDayToday;
   final bool hasWorkSchedule;
+  final bool isHolidayToday;
+  final String? holidayName;
+  final double? officeLatitude;
+  final double? officeLongitude;
+  final double? geofenceRadiusMeters;
+  final String? officeName;
 
   UserStatusModel({
     required this.userName,
@@ -38,6 +43,12 @@ class UserStatusModel {
     required this.workingDays,
     required this.isWorkingDayToday,
     required this.hasWorkSchedule,
+    required this.isHolidayToday,
+    required this.holidayName,
+    required this.officeLatitude,
+    required this.officeLongitude,
+    required this.geofenceRadiusMeters,
+    required this.officeName,
   });
 
   bool get hasCheckedIn =>
@@ -70,7 +81,8 @@ class UserStatusModel {
   factory UserStatusModel.fromJson(Map<String, dynamic> json) {
     final checkInAt = _parseTimestamp(json['check_in_at']);
     final checkOutAt = _parseTimestamp(json['check_out_at']);
-    final checkInTime = json['check_in_time']?.toString() ?? _emptyAttendanceTime;
+    final checkInTime =
+        json['check_in_time']?.toString() ?? _emptyAttendanceTime;
     final checkOutTime =
         json['check_out_time']?.toString() ?? _emptyAttendanceTime;
     final hasCheckIn = checkInAt != null || checkInTime != _emptyAttendanceTime;
@@ -96,13 +108,22 @@ class UserStatusModel {
       shiftStartTime: json['start_time']?.toString(),
       shiftEndTime: json['end_time']?.toString(),
       workingDays: json['working_days'] is List
-          ? (json['working_days'] as List)
-              .map((day) => day.toString())
-              .toList()
+          ? (json['working_days'] as List).map((day) => day.toString()).toList()
           : const [],
       isWorkingDayToday: json['is_working_day_today'] == true,
       hasWorkSchedule: json['has_work_schedule'] == true,
+      isHolidayToday: json['is_holiday_today'] == true,
+      holidayName: json['holiday_name']?.toString(),
+      officeLatitude: _parseDouble(json['office_latitude']),
+      officeLongitude: _parseDouble(json['office_longitude']),
+      geofenceRadiusMeters: _parseDouble(json['geofence_radius_meters']),
+      officeName: json['office_name']?.toString(),
     );
+  }
+
+  static double? _parseDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return value is String ? double.tryParse(value) : null;
   }
 
   static DateTime? _parseTimestamp(dynamic value) {

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:staff_attendance_mobile/config/api_config.dart';
+import 'package:staff_attendance_mobile/services/notification_storage.dart';
 
 class AuthService {
   static String get baseUrl => ApiConfig.baseUrl;
@@ -29,9 +30,7 @@ class AuthService {
     try {
       decoded = jsonDecode(response.body);
     } on FormatException {
-      throw Exception(
-        'The server returned an invalid response (${response.statusCode}).',
-      );
+      throw Exception('The server returned an invalid response.');
     }
     if (decoded is! Map) {
       throw Exception('The server response was not a JSON object.');
@@ -39,10 +38,10 @@ class AuthService {
     final data = Map<String, dynamic>.from(decoded);
 
     if (response.statusCode != 200) {
-      throw Exception(
-        'Status: ${response.statusCode} | '
-        '${data['message'] ?? response.body}',
-      );
+      if (response.statusCode == 401) {
+        throw Exception('Email or password is incorrect.');
+      }
+      throw Exception(data['message']?.toString() ?? 'Unable to sign in.');
     }
 
     final token = data['token'];
@@ -52,6 +51,10 @@ class AuthService {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_token', token);
+    await prefs.setInt(
+      'last_active_at',
+      DateTime.now().millisecondsSinceEpoch,
+    );
     final user = data['user'];
     if (user is Map && user['id'] != null) {
       await prefs.setInt('auth_user_id', int.parse(user['id'].toString()));
@@ -93,16 +96,29 @@ class AuthService {
       }
     }
 
+    await clearLocalSession();
+    return serverSessionRevoked;
+  }
+
+  static Future<void> clearLocalSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('auth_user_id');
+    if (userId != null) {
+      await NotificationStorage.clearForUser(userId);
+    } else {
+      await NotificationStorage.clearLegacyNotifications();
+    }
     await prefs.remove('auth_token');
     await prefs.remove('auth_user_id');
     await prefs.remove('auth_role');
-    return serverSessionRevoked;
+    await prefs.remove('last_active_at');
   }
 
   // register method
   Future<Map<String, dynamic>> registerStaff({
     required String token,
     required String name,
+    String? phone,
     required String password,
     required String confirmPassword,
   }) async {
@@ -118,6 +134,7 @@ class AuthService {
             // converts the dart map into raw json string
             'token': token,
             'name': name.trim(),
+            if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
             'password': password,
             'password_confirmation': confirmPassword,
           }),

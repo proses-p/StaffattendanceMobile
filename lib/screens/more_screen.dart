@@ -1,21 +1,56 @@
 import 'package:flutter/material.dart';
 import 'package:staff_attendance_mobile/screens/attendance_history_screen.dart';
+import 'package:staff_attendance_mobile/screens/ai_assistant_screen.dart';
 import 'package:staff_attendance_mobile/screens/daily_work_submission_screen.dart';
 import 'package:staff_attendance_mobile/screens/field_mode_screen.dart';
 import 'package:staff_attendance_mobile/screens/leave_management_screen.dart';
+import 'package:staff_attendance_mobile/screens/my_payslip_screen.dart';
+import 'package:staff_attendance_mobile/screens/notice_board_screen.dart';
 import 'package:staff_attendance_mobile/screens/profile_screen.dart';
+import 'package:staff_attendance_mobile/screens/team_chat_screen.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
 
-class MoreScreen extends StatelessWidget {
+class MoreScreen extends StatefulWidget {
   const MoreScreen({this.onSelectTab, super.key});
 
-  static const _primaryColor = Color(0xFFFB923C);
   final ValueChanged<int>? onSelectTab;
+
+  @override
+  State<MoreScreen> createState() => _MoreScreenState();
+}
+
+class _MoreScreenState extends State<MoreScreen> {
+  static const _primaryColor = Color(0xFFFB923C);
+  int _unreadAnnouncements = 0;
+  String? _announcementError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAnnouncementCount();
+  }
+
+  Future<void> _loadAnnouncementCount() async {
+    try {
+      final response = await ApiService().fetchAnnouncements();
+      if (!mounted) return;
+      setState(() {
+        _unreadAnnouncements = response['unread_count'] as int? ?? 0;
+        _announcementError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _unreadAnnouncements = 0;
+        _announcementError = error.toString();
+      });
+    }
+  }
 
   void _navigateToTab(BuildContext context, int index) {
     final navigator = Navigator.of(context);
     if (index == 0) {
-      onSelectTab?.call(index);
+      widget.onSelectTab?.call(index);
       navigator.pop();
     } else if (index == 1) {
       navigator.push(
@@ -30,10 +65,10 @@ class MoreScreen extends StatelessWidget {
         ),
       );
     } else if (index == 4) {
-      onSelectTab?.call(index);
+      widget.onSelectTab?.call(index);
       navigator.pushReplacement<void, void>(
         MaterialPageRoute<void>(
-          builder: (_) => ProfileScreen(onSelectTab: onSelectTab),
+          builder: (_) => ProfileScreen(onSelectTab: widget.onSelectTab),
         ),
       );
     }
@@ -55,6 +90,107 @@ class MoreScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Card(
+            color: const Color(0xFFFFF7ED),
+            child: ListTile(
+              leading: const Icon(Icons.auto_awesome, color: _primaryColor),
+              title: const Text(
+                'AI Work Assistant',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text(
+                'Personal work, schedule, and earnings help.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => AiAssistantScreen(apiService: ApiService()),
+                ),
+              ),
+            ),
+          ),
+          Card(
+            color: Colors.white,
+            child: ListTile(
+              leading: const Icon(
+                Icons.account_balance_wallet_outlined,
+                color: _primaryColor,
+              ),
+              title: const Text('My Payslip & Earnings'),
+              subtitle: const Text('View monthly earnings and performance.'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => MyPayslipScreen(apiService: ApiService()),
+                ),
+              ),
+            ),
+          ),
+          Card(
+            color: Colors.white,
+            child: ListTile(
+              leading: const Icon(
+                Icons.campaign_outlined,
+                color: _primaryColor,
+              ),
+              title: const Text('Notice Board'),
+              subtitle: Text(
+                _announcementError ?? 'Company announcements and updates.',
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_unreadAnnouncements > 0)
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 22),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade600,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _unreadAnnouncements > 99
+                            ? '99+'
+                            : '$_unreadAnnouncements',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+              onTap: () async {
+                await Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const NoticeBoardScreen(),
+                  ),
+                );
+                await _loadAnnouncementCount();
+              },
+            ),
+          ),
+          Card(
+            color: Colors.white,
+            child: ListTile(
+              leading: const Icon(Icons.forum_outlined, color: _primaryColor),
+              title: const Text('Team Chat'),
+              subtitle: const Text(
+                'Chat with your organization and colleagues.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(builder: (_) => const TeamChatScreen()),
+              ),
+            ),
+          ),
           Card(
             color: Colors.white,
             child: ListTile(
@@ -84,9 +220,8 @@ class MoreScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
-                  builder: (_) => DailyWorkSubmissionScreen(
-                    apiService: ApiService(),
-                  ),
+                  builder: (_) =>
+                      DailyWorkSubmissionScreen(apiService: ApiService()),
                 ),
               ),
             ),

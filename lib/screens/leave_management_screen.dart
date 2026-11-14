@@ -255,6 +255,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
             padding: const EdgeInsets.only(top: 5),
             child: Text(
               '${_formatDate(request.startDate)} – ${_formatDate(request.endDate)}'
+              '${request.leaveDays == null ? '' : '\n${request.leaveDays} scheduled leave ${request.leaveDays == 1 ? 'day' : 'days'} (holidays excluded)'}'
               '${request.submittedAt == null ? '' : '\nSubmitted ${_formatDate(request.submittedAt!)}'}',
               style: const TextStyle(
                 color: Color(0xFF64748B),

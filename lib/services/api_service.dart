@@ -15,15 +15,20 @@ import 'package:staff_attendance_mobile/services/device_security_service.dart';
 import 'package:staff_attendance_mobile/services/trusted_clock.dart';
 
 class ApiRequestException implements Exception {
-  const ApiRequestException(this.statusCode, this.message, {this.code});
+  ApiRequestException(
+    this.statusCode,
+    String message, {
+    this.code,
+    this.remainingQuota,
+  }) : message = _cleanApiError(message);
 
   final int statusCode;
   final String message;
 
   final String? code;
+  final int? remainingQuota;
   @override
   String toString() => message;
-
 }
 
 class ApiService {
@@ -75,6 +80,70 @@ class ApiService {
       );
     }
     return data;
+  }
+
+  Future<Map<String, dynamic>> askStaffAiAssistant(String message) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/ai/staff-assistant'),
+      headers: await _getHeaders(),
+      body: json.encode({'message': message}),
+    );
+    final data = _decodeResponse(response);
+    await _saveAiQuota(data);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to reach the AI work assistant.'),
+        remainingQuota: _quotaValue(data['remaining_quota']),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> draftDailyWorkReport({
+    required String roughNotes,
+    String? assignedTaskTitle,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/ai/draft-work-report'),
+      headers: await _getHeaders(),
+      body: json.encode({
+        'rough_notes': roughNotes,
+        if (assignedTaskTitle?.trim().isNotEmpty == true)
+          'assigned_task_title': assignedTaskTitle!.trim(),
+      }),
+    );
+    final data = _decodeResponse(response);
+    await _saveAiQuota(data);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to draft the daily work report.'),
+        remainingQuota: _quotaValue(data['remaining_quota']),
+      );
+    }
+    return data;
+  }
+
+  Future<void> _saveAiQuota(Map<String, dynamic> data) async {
+    final remaining = data['remaining_quota'];
+    if (remaining is! num) return;
+    final preferences = await SharedPreferences.getInstance();
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    await preferences.setInt(
+      'ai_remaining_quota',
+      remaining.toInt().clamp(0, 15).toInt(),
+    );
+    await preferences.setString('ai_quota_day', today);
+    final userId = preferences.getInt('auth_user_id');
+    if (userId != null) {
+      await preferences.setInt('ai_quota_user_id', userId);
+    }
+  }
+
+  int? _quotaValue(Object? value) {
+    if (value is num) return value.toInt().clamp(0, 15).toInt();
+    return int.tryParse(value?.toString() ?? '');
   }
 
   Future<Map<String, dynamic>> submitDailyWork({
@@ -234,8 +303,8 @@ class ApiService {
     await TrustedClock.instance.anchor(DateTime.parse(value));
   }
 
-    // Method ya kuvuta notifications ambazo hazijasomwa kutoka Laravel
-    Future<List<dynamic>> fetchUnreadNotifications() async {
+  // Method ya kuvuta notifications ambazo hazijasomwa kutoka Laravel
+  Future<List<dynamic>> fetchUnreadNotifications() async {
     final response = await http
         .get(
           Uri.parse('$baseUrl/notifications/unread'),
@@ -249,8 +318,6 @@ class ApiService {
     }
     return [];
   }
-
-
 
   Future<Map<String, dynamic>> fetchFieldStats({
     bool allowCached = true,
@@ -285,6 +352,106 @@ class ApiService {
       if (error.statusCode < 500) rethrow;
       return _cachedFieldStats(preferences, cacheKey, allowCached);
     }
+  }
+
+  Future<Map<String, dynamic>> fetchFieldStatus() async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/field/status'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to load field visit status.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> startFieldVisit({
+    required String clientOrServiceName,
+    required String purpose,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/field/start'),
+      headers: await _getHeaders(),
+      body: json.encode({
+        'client_or_service_name': clientOrServiceName,
+        'purpose': purpose,
+        'latitude': latitude,
+        'longitude': longitude,
+      }),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 201) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to start the field visit.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> endFieldVisit({
+    int? visitId,
+    required double latitude,
+    required double longitude,
+    String? completionNotes,
+    String expenseAmount = '0',
+    String? expenseDescription,
+    String? receiptPhotoPath,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/field/end'),
+    );
+    request.headers.addAll(await _getHeaders());
+    request.headers.remove('Content-Type');
+    request.fields.addAll({
+      if (visitId != null) 'visit_id': visitId.toString(),
+      'latitude': latitude.toString(),
+      'longitude': longitude.toString(),
+      'expense_amount': expenseAmount.trim().isEmpty
+          ? '0'
+          : expenseAmount.trim(),
+      if (completionNotes?.trim().isNotEmpty == true)
+        'completion_notes': completionNotes!.trim(),
+      if (expenseDescription?.trim().isNotEmpty == true)
+        'expense_description': expenseDescription!.trim(),
+    });
+    if (receiptPhotoPath != null) {
+      final extension = receiptPhotoPath.toLowerCase().split('.').last;
+      final mime = switch (extension) {
+        'jpg' || 'jpeg' => MediaType('image', 'jpeg'),
+        'png' => MediaType('image', 'png'),
+        'webp' => MediaType('image', 'webp'),
+        _ => throw ArgumentError.value(receiptPhotoPath, 'receiptPhotoPath'),
+      };
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'receipt_photo',
+          receiptPhotoPath,
+          filename: File(receiptPhotoPath).uri.pathSegments.last,
+          contentType: mime,
+        ),
+      );
+    }
+
+    final streamedResponse = await _client
+        .send(request)
+        .timeout(const Duration(seconds: 45));
+    final response = await http.Response.fromStream(streamedResponse);
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to complete the field visit.'),
+      );
+    }
+    return data;
   }
 
   Map<String, dynamic> _cachedFieldStats(
@@ -599,10 +766,7 @@ class ApiService {
 
     throw ApiRequestException(
       response.statusCode,
-      _responseMessage(
-        responseData,
-        'Attendance request failed (${response.statusCode}).',
-      ),
+      _responseMessage(responseData, 'Attendance request failed.'),
       code: responseData['code']?.toString(),
     );
   }
@@ -626,10 +790,7 @@ class ApiService {
 
     if (response.statusCode != 200) {
       final responseData = _decodeResponse(response);
-      throw Exception(
-        responseData['message'] ??
-            'Dashboard request failed (${response.statusCode}).',
-      );
+      throw Exception(responseData['message'] ?? 'Dashboard request failed.');
     }
 
     final responseData = _decodeResponse(response);
@@ -647,6 +808,80 @@ class ApiService {
     });
   }
 
+  Future<Map<String, dynamic>> fetchMyPayslip({String? month}) async {
+    final uri = Uri.parse('$baseUrl/my-payslip')
+        .replace(queryParameters: month == null ? null : {'month': month});
+    final response = await _client.get(uri, headers: await _getHeaders());
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to load your payslip.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> submitSalaryAdvanceRequest({
+    required double amount,
+    required String reason,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/salary-advances'),
+      headers: await _getHeaders(),
+      body: json.encode({'amount': amount, 'reason': reason}),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 201) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to submit your salary advance request.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> fetchAnnouncements() async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/announcements'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to load company announcements.'),
+      );
+    }
+
+    final announcements = data['announcements'];
+    return {
+      'announcements': announcements is List
+          ? announcements
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList()
+          : <Map<String, dynamic>>[],
+      'unread_count': data['unread_count'] is num
+          ? (data['unread_count'] as num).toInt()
+          : 0,
+    };
+  }
+
+  Future<void> markAnnouncementRead(int announcementId) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/announcements/$announcementId/read'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to mark this announcement as read.'),
+      );
+    }
+  }
+
   Future<AttendanceHistoryPage> fetchAttendanceHistory({
     required int page,
   }) async {
@@ -659,8 +894,7 @@ class ApiService {
 
     if (response.statusCode != 200) {
       throw Exception(
-        responseData['message'] ??
-            'Attendance history request failed (${response.statusCode}).',
+        responseData['message'] ?? 'Attendance history request failed.',
       );
     }
 
@@ -749,16 +983,169 @@ class ApiService {
       return responseData;
     }
 
-    throw Exception(
-      responseData['message'] ??
-          'Attendance request failed (${response.statusCode}).',
+    throw Exception(responseData['message'] ?? 'Attendance request failed.');
+  }
+
+  Future<Map<String, dynamic>> fetchGroupChat({int? afterId}) async {
+    final uri = Uri.parse('$baseUrl/chat/group').replace(
+      queryParameters: afterId == null ? null : {'after_id': '$afterId'},
     );
+    final response = await _client.get(uri, headers: await _getHeaders());
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to load team chat.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> sendGroupChatMessage(String message) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/chat/group'),
+      headers: await _getHeaders(),
+      body: json.encode({'message': message}),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 201) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to send your message.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> updateGroupChatMessage({
+    required int messageId,
+    required String message,
+  }) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/chat/group/$messageId'),
+      headers: await _getHeaders(),
+      body: json.encode({'message': message}),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to edit this message.'),
+      );
+    }
+    return data;
+  }
+
+  Future<void> deleteGroupChatMessage(int messageId) async {
+    final response = await _client.delete(
+      Uri.parse('$baseUrl/chat/group/$messageId'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to delete this message.'),
+      );
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchPrivateConversations() async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/chat/private/conversations'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to load private conversations.'),
+      );
+    }
+    final conversations = data['conversations'];
+    if (conversations is! List) return const [];
+    return conversations
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> fetchPrivateChat(int colleagueId) async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/chat/private/$colleagueId'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to load this conversation.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> sendPrivateChatMessage({
+    required int colleagueId,
+    required String message,
+    String? quotedMessage,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/chat/private/$colleagueId'),
+      headers: await _getHeaders(),
+      body: json.encode({
+        'message': message,
+        if (quotedMessage != null && quotedMessage.isNotEmpty)
+          'quoted_message': quotedMessage,
+      }),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 201) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to send your private message.'),
+      );
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> updatePrivateChatMessage({
+    required int messageId,
+    required String message,
+  }) async {
+    final response = await _client.put(
+      Uri.parse('$baseUrl/chat/private/message/$messageId'),
+      headers: await _getHeaders(),
+      body: json.encode({'message': message}),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to edit this message.'),
+      );
+    }
+    return data;
+  }
+
+  Future<void> deletePrivateChatMessage(int messageId) async {
+    final response = await _client.delete(
+      Uri.parse('$baseUrl/chat/private/message/$messageId'),
+      headers: await _getHeaders(),
+    );
+    final data = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw ApiRequestException(
+        response.statusCode,
+        _responseMessage(data, 'Unable to delete this message.'),
+      );
+    }
   }
 
   Future<StaffProfile> fetchProfile() async {
     final headers = await _getHeaders();
     final response = await http.get(
-      Uri.parse('$baseUrl/user'),
+      Uri.parse('$baseUrl/profile'),
       headers: headers,
     );
     final responseData = _decodeResponse(response);
@@ -782,7 +1169,7 @@ class ApiService {
   }) async {
     final headers = await _getHeaders();
     final response = await http.put(
-      Uri.parse('$baseUrl/user'),
+      Uri.parse('$baseUrl/profile'),
       headers: headers,
       body: json.encode({'name': name, 'phone': phone}),
     );
@@ -799,6 +1186,50 @@ class ApiService {
       throw Exception('The updated profile response is incomplete.');
     }
     return StaffProfile.fromJson(user);
+  }
+
+  Future<void> requestPasswordResetCode({required String email}) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/auth/forgot-password'),
+      headers: const {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: json.encode({'email': email.trim()}),
+    );
+    final responseData = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw Exception(
+        _responseMessage(responseData, 'Unable to send the reset code.'),
+      );
+    }
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String code,
+    required String password,
+    required String passwordConfirmation,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/auth/reset-password'),
+      headers: const {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: json.encode({
+        'email': email.trim(),
+        'code': code.trim(),
+        'password': password,
+        'password_confirmation': passwordConfirmation,
+      }),
+    );
+    final responseData = _decodeResponse(response);
+    if (response.statusCode != 200) {
+      throw Exception(
+        _responseMessage(responseData, 'Unable to reset your password.'),
+      );
+    }
   }
 
   Future<void> changePassword({
@@ -832,9 +1263,7 @@ class ApiService {
     try {
       decoded = json.decode(response.body);
     } on FormatException {
-      throw Exception(
-        'The server returned an invalid response (${response.statusCode}).',
-      );
+      throw Exception('The server returned an invalid response.');
     }
 
     final data = _asJsonMap(decoded);
@@ -864,18 +1293,30 @@ class ApiService {
         .map((value) => value.toString())
         .join(' ');
 
-    if (message != null &&
-        message.isNotEmpty &&
-        details != null &&
-        details.isNotEmpty) {
-      return '$message $details';
-    }
-    if (message != null && message.isNotEmpty) {
-      return message;
-    }
-    if (details != null && details.isNotEmpty) {
-      return details;
-    }
-    return fallback;
+    final responseMessage = message != null && message.isNotEmpty
+        ? [
+            message,
+            if (details != null && details.isNotEmpty) details,
+          ].join(' ')
+        : details != null && details.isNotEmpty
+        ? details
+        : fallback;
+    return _cleanApiError(responseMessage);
   }
+}
+
+String _cleanApiError(String value) {
+  var message = value.trim();
+  message = message.replaceAll(
+    RegExp(r'\s*\((?:HTTP\s*)?\d{3}\)', caseSensitive: false),
+    '',
+  );
+  final prefix = RegExp(
+    r'^(?:(?:[A-Za-z]*Exception|StateError)\s*:\s*|Error\s+\d{3}\s*:\s*|Error\s*:\s*|Status(?:\s+code)?\s*:\s*\d{3}\s*\|\s*|HTTP\s+\d{3}\s*:\s*|\d{3}\s*:\s*)',
+    caseSensitive: false,
+  );
+  while (prefix.hasMatch(message)) {
+    message = message.replaceFirst(prefix, '').trim();
+  }
+  return message;
 }

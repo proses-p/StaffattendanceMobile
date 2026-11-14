@@ -1,9 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:staff_attendance_mobile/screens/forgot_password_screen.dart';
+
 import '../services/auth_service.dart';
 import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({
+    this.sessionExpired = false,
+    this.onAuthenticated,
+    super.key,
+  });
+
+  final bool sessionExpired;
+  final VoidCallback? onAuthenticated;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -19,11 +28,43 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  Future<void> _openForgotPassword() async {
+    final reset = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const ForgotPasswordScreen(),
+      ),
+    );
+    if (reset == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password reset successfully. Sign in now.')),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.sessionExpired) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Session expired due to inactivity. Please sign in again.',
+            ),
+            duration: Duration(seconds: 5),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      });
+    }
   }
 
   // validate the form inputs
@@ -37,49 +78,52 @@ class _LoginScreenState extends State<LoginScreen> {
       _errorMessage = null;
     });
 
-    // await Future.delayed(const Duration(seconds: 3));
-
     try {
       final result = await AuthService().login(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-    
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    final token = result['token'];
+      final token = result['token'];
 
-    if (token == null) {
-      throw Exception('Login response is null');
+      if (token == null) {
+        throw Exception('Login response is null');
+      }
+
+      widget.onAuthenticated?.call();
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => const DashboardScreen(),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _displayError(error));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  String _displayError(Object error) {
+    var message = error.toString().trim();
+    final prefix = RegExp(
+      r'^(?:(?:[A-Za-z]*Exception|StateError)\s*:\s*|Error\s+\d{3}\s*:\s*|Error\s*:\s*|Status(?:\s+code)?\s*:\s*\d{3}\s*\|\s*|HTTP\s+\d{3}\s*:\s*|\d{3}\s*:\s*)',
+      caseSensitive: false,
+    );
+    while (prefix.hasMatch(message)) {
+      message = message.replaceFirst(prefix, '').trim();
     }
 
-    // ScaffoldMessenger.of(context).showSnackBar(
-    //   const SnackBar(content: Text('Login successful!'),
-    //   ),
-    // );
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => const DashboardScreen(), 
-      )
-    );
-
-    // save the token and open the staff dashboard
-  } catch (error) {
-    if (!mounted) return;
-  
-
-    setState(() {
-      // _isLoading = false;
-      _errorMessage = error.toString().replaceFirst('Exception : ', '');
-    });
-  } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-  }
+    final normalized = message.toLowerCase();
+    if (normalized.contains('invalid email or password') ||
+        normalized.contains('email or password is incorrect')) {
+      return 'Email or password is incorrect.';
+    }
+    return message;
   }
 
   @override
@@ -300,6 +344,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                 width: 1.5,
                               ),
                             ),
+                          ),
+                        ),
+
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _isLoading ? null : _openForgotPassword,
+                            child: const Text('Forgot Password?'),
                           ),
                         ),
 

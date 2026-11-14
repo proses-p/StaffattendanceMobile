@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:staff_attendance_mobile/screens/notification_service.dart';
 import 'package:staff_attendance_mobile/services/api_service.dart';
+import 'package:staff_attendance_mobile/services/app_theme_manager.dart';
 import 'package:staff_attendance_mobile/services/sync_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
   const ProfileSettingsScreen({this.apiService, super.key});
@@ -21,12 +25,173 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   PackageInfo? _packageInfo;
   bool _packageInfoUnavailable = false;
   bool _isRecoveringKey = false;
+  bool _dailyRemindersEnabled = true;
+  bool _adminUpdatesEnabled = true;
+  bool _isLoadingNotificationSettings = true;
   String? _keyRecoveryError;
 
   @override
   void initState() {
     super.initState();
     _loadPackageInfo();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _dailyRemindersEnabled =
+          preferences.getBool('daily_attendance_reminders_enabled') ?? true;
+      _adminUpdatesEnabled =
+          preferences.getBool('admin_updates_enabled') ?? true;
+      _isLoadingNotificationSettings = false;
+    });
+  }
+
+  Future<void> _setDailyReminders(bool enabled) async {
+    setState(() => _dailyRemindersEnabled = enabled);
+    try {
+      await NotificationService().setDailyRemindersEnabled(enabled);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'Attendance reminders enabled.'
+                : 'Attendance reminders disabled.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _dailyRemindersEnabled = !enabled);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to update reminders: $error')),
+      );
+    }
+  }
+
+  Future<void> _setAdminUpdates(bool enabled) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool('admin_updates_enabled', enabled);
+    if (mounted) setState(() => _adminUpdatesEnabled = enabled);
+  }
+
+  Future<void> _contactSupport() async {
+    const email = 'support@wadudu.co.tz';
+    const emailUri =
+        'mailto:support@wadudu.co.tz'
+        '?subject=Staff%20Attendance%20App%20Support';
+    try {
+      if (await canLaunchUrl(Uri.parse(emailUri)) &&
+          await launchUrl(
+            Uri.parse(emailUri),
+            mode: LaunchMode.externalApplication,
+          )) {
+        return;
+      }
+    } catch (_) {
+      // Copy the support address when no email application can be opened.
+    }
+
+    await Clipboard.setData(const ClipboardData(text: email));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Support email copied to clipboard.')),
+    );
+  }
+
+  Future<void> _openWhatsAppSupport() async {
+    const whatsappUri =
+        'https://wa.me/?text='
+        'Hello%2C%20I%20need%20support%20with%20the%20Staff%20Attendance%20app.';
+    try {
+      if (await canLaunchUrl(Uri.parse(whatsappUri)) &&
+          await launchUrl(
+            Uri.parse(whatsappUri),
+            mode: LaunchMode.externalApplication,
+          )) {
+        return;
+      }
+    } catch (_) {
+      // Show the available support contact if WhatsApp cannot be opened.
+    }
+
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Contact support',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              const Text('Email HR / Admin Support: support@wadudu.co.tz'),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(
+                    const ClipboardData(text: 'support@wadudu.co.tz'),
+                  );
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.copy_outlined),
+                label: const Text('Copy support email'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showQuickGuide() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Quick user guide',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'GPS accuracy: Check in and out near your work location. '
+                'The reported GPS accuracy must be 30 metres or better; move '
+                'to an open area if accuracy is lower.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Screen lock and biometrics: Set up a device screen lock '
+                '(PIN, pattern, password, fingerprint, or face unlock). '
+                'Attendance signing requires device security to be enabled.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Daily Work Submissions: Submit your completed work and at '
+                'least one photo each day. Admin feedback may ask you to '
+                'revise and resubmit a report.',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -109,11 +274,10 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final packageInfo = _packageInfo;
+    final theme = Theme.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF8FAFC),
-        foregroundColor: const Color(0xFF172033),
         elevation: 0,
         title: const Text(
           'Settings',
@@ -154,10 +318,10 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                       style: TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
+                    Text(
                       'Enter your current account password to restore secure attendance and field sync.',
                       style: TextStyle(
-                        color: Color(0xFF64748B),
+                        color: theme.colorScheme.onSurfaceVariant,
                         height: 1.4,
                       ),
                     ),
@@ -211,6 +375,112 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
             ],
           ),
           const SizedBox(height: 22),
+          const _SectionTitle(title: 'Appearance / Theme'),
+          _SettingsCard(
+            children: [
+              ValueListenableBuilder<ThemeMode>(
+                valueListenable: AppThemeManager.instance.themeMode,
+                builder: (context, themeMode, _) => Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Choose how Staff Attendance looks on this device.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final (mode, label, icon) in [
+                            (
+                              ThemeMode.light,
+                              'Light',
+                              Icons.light_mode_outlined,
+                            ),
+                            (ThemeMode.dark, 'Dark', Icons.dark_mode_outlined),
+                            (
+                              ThemeMode.system,
+                              'System Default',
+                              Icons.settings_brightness_outlined,
+                            ),
+                          ])
+                            ChoiceChip(
+                              avatar: Icon(icon, size: 18),
+                              label: Text(label),
+                              selected: themeMode == mode,
+                              onSelected: (_) =>
+                                  AppThemeManager.instance.setThemeMode(mode),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const _SectionTitle(title: 'Notifications'),
+          _SettingsCard(
+            children: [
+              SwitchListTile(
+                secondary: const Icon(
+                  Icons.access_alarm_outlined,
+                  color: Color(0xFFFB923C),
+                ),
+                title: const Text('Daily Check-In & Check-Out Reminders'),
+                subtitle: const Text('Receive scheduled attendance reminders.'),
+                value: _dailyRemindersEnabled,
+                onChanged: _isLoadingNotificationSettings
+                    ? null
+                    : _setDailyReminders,
+              ),
+              SwitchListTile(
+                secondary: const Icon(
+                  Icons.campaign_outlined,
+                  color: Color(0xFFFB923C),
+                ),
+                title: const Text('Admin Updates'),
+                subtitle: const Text(
+                  'Show local alerts for leave and daily work updates.',
+                ),
+                value: _adminUpdatesEnabled,
+                onChanged: _isLoadingNotificationSettings
+                    ? null
+                    : _setAdminUpdates,
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const _SectionTitle(title: 'Help & Support'),
+          _SettingsCard(
+            children: [
+              _SettingsTile(
+                icon: Icons.email_outlined,
+                title: 'Contact HR / Admin Support',
+                subtitle: 'Email support@wadudu.co.tz',
+                onTap: _contactSupport,
+              ),
+              _SettingsTile(
+                icon: Icons.chat_outlined,
+                title: 'WhatsApp / Phone Support',
+                subtitle: 'Open WhatsApp or view available support contact.',
+                onTap: _openWhatsAppSupport,
+              ),
+              _SettingsTile(
+                icon: Icons.menu_book_outlined,
+                title: 'Quick User Guide / FAQ',
+                subtitle: 'GPS accuracy, device security, and work reports.',
+                onTap: _showQuickGuide,
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
           const _SectionTitle(title: 'Privacy'),
           _SettingsCard(
             children: [
@@ -237,19 +507,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                           '(build ${packageInfo.buildNumber})',
               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              'Theme selection, notification controls, and support links are not '
-              'shown because this app does not currently provide those settings.',
-              style: TextStyle(
-                color: Color(0xFF64748B),
-                fontSize: 12,
-                height: 1.5,
-              ),
-            ),
           ),
         ],
       ),
@@ -335,10 +592,8 @@ class _DeviceSecurityScreenState extends State<DeviceSecurityScreen> {
   Widget build(BuildContext context) {
     final status = _deviceStatus?['status']?.toString();
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF8FAFC),
-        foregroundColor: const Color(0xFF172033),
         elevation: 0,
         title: const Text(
           'Device Security',
@@ -447,10 +702,17 @@ class _DeviceSecurityScreenState extends State<DeviceSecurityScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    color: Color(0xFF172033),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 6),
-                Text(description, style: const TextStyle(height: 1.45)),
+                Text(
+                  description,
+                  style: const TextStyle(height: 1.45)
+                      .apply(bodyColor: Color(0xFF475569)),
+                ),
               ],
             ),
           ),
@@ -555,10 +817,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF8FAFC),
-        foregroundColor: const Color(0xFF172033),
         elevation: 0,
         title: const Text(
           'Change password',
@@ -675,12 +935,13 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
       child: Text(
         title,
-        style: const TextStyle(
-          color: Color(0xFF172033),
+        style: TextStyle(
+          color: theme.colorScheme.onSurface,
           fontSize: 17,
           fontWeight: FontWeight.w700,
         ),
@@ -696,10 +957,11 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        color: theme.cardColor,
+        border: Border.all(color: theme.colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(children: children),
@@ -722,18 +984,28 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return ListTile(
       onTap: onTap,
       minVerticalPadding: 14,
-      leading: Icon(icon, color: const Color(0xFFFB923C)),
+      leading: Icon(icon, color: theme.colorScheme.primary),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: Text(subtitle, style: const TextStyle(height: 1.4)),
+        child: Text(
+          subtitle,
+          style: TextStyle(
+            height: 1.4,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
       ),
       trailing: onTap == null
           ? null
-          : const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+          : Icon(
+              Icons.chevron_right,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
     );
   }
 }
