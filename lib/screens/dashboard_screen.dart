@@ -474,7 +474,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // ===================================================
                   Container(
                     width: double.infinity,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       color: primaryColor, // Vibrant Orange
                       borderRadius: BorderRadius.circular(24),
                     ),
