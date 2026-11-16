@@ -13,29 +13,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. HII NDIYO HATUA ILIYOKOSEKANA (Kuweka Flutter SDK)
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
-      # 2. Tumia 'flutter pub get' badala ya 'dart pub get'
       - name: Get Flutter dependencies
         run: flutter pub get
 
-      # 3. Jenga iOS bila kuweka saini ya Apple Developer (Unsigned IPA)
-      - name: Build iOS Release (No Codesign)
-        run: flutter build ios --release --no-codesign
+      - name: Prepare Flutter iOS build
+        run: flutter build ios --config-only --release --no-codesign
 
-      # 4. Fungasha (Package) kuwa faili la .ipa
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Build Unsigned Runner.app
+        run: |
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/ios_derived \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
+          cp -r build/ios_derived/Build/Products/Release-iphoneos/Runner.app Payload/
           zip -r -y StaffAttendance.ipa Payload
 
-      # 5. Pakia faili la .ipa ili uweze kulidownload kwenye GitHub
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
