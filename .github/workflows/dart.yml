@@ -1,42 +1,43 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Dart
+name: Build iOS IPA
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-ios:
+    runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      # Note: This workflow uses the latest stable version of the Dart SDK.
-      # You can specify other versions if desired, see documentation here:
-      # https://github.com/dart-lang/setup-dart/blob/main/README.md
-      # - uses: dart-lang/setup-dart@v1
-      - uses: dart-lang/setup-dart@9a04e6d73cca37bd455e0608d7e5092f881fd603
+      # 1. HII NDIYO HATUA ILIYOKOSEKANA (Kuweka Flutter SDK)
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
 
-      - name: Install dependencies
-        run: dart pub get
+      # 2. Tumia 'flutter pub get' badala ya 'dart pub get'
+      - name: Get Flutter dependencies
+        run: flutter pub get
 
-      # Uncomment this step to verify the use of 'dart format' on each commit.
-      # - name: Verify formatting
-      #   run: dart format --output=none --set-exit-if-changed .
+      # 3. Jenga iOS bila kuweka saini ya Apple Developer (Unsigned IPA)
+      - name: Build iOS Release (No Codesign)
+        run: flutter build ios --release --no-codesign
 
-      # Consider passing '--fatal-infos' for slightly stricter analysis.
-      - name: Analyze project source
-        run: dart analyze
+      # 4. Fungasha (Package) kuwa faili la .ipa
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r -y StaffAttendance.ipa Payload
 
-      # Your project will need to have tests in test/ and a dependency on
-      # package:test for this step to succeed. Note that Flutter projects will
-      # want to change this to 'flutter test'.
-      - name: Run tests
-        run: dart test
+      # 5. Pakia faili la .ipa ili uweze kulidownload kwenye GitHub
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StaffAttendance-IPA
+          path: StaffAttendance.ipa
