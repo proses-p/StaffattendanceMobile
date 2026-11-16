@@ -15,7 +15,7 @@ import Darwin
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     let clockChannel = FlutterMethodChannel(
       name: "attendance/clock",
-      binaryMessenger: engineBridge.engine.binaryMessenger
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     clockChannel.setMethodCallHandler { call, result in
       guard call.method == "elapsedRealtime" else {
