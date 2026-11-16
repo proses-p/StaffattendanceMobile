@@ -22,10 +22,10 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
-      - name: Ensure iOS project files & Podfile exist
+      - name: Ensure iOS project files exist
         run: flutter create --platforms=ios .
 
-      - name: Prepare Flutter iOS build
+      - name: Prepare Flutter iOS config
         run: flutter build ios --config-only --release --no-codesign
 
       - name: Install CocoaPods (if Podfile exists)
@@ -37,25 +37,21 @@ jobs:
 
       - name: Build Unsigned Runner.app
         run: |
+          WORKSPACE_FLAG="-project ios/Runner.xcodeproj"
           if [ -d "ios/Runner.xcworkspace" ]; then
-            xcodebuild -workspace ios/Runner.xcworkspace \
-              -scheme Runner \
-              -configuration Release \
-              -sdk iphoneos \
-              -derivedDataPath build/ios_derived \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO
-          else
-            xcodebuild -project ios/Runner.xcodeproj \
-              -scheme Runner \
-              -configuration Release \
-              -sdk iphoneos \
-              -derivedDataPath build/ios_derived \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO
+            WORKSPACE_FLAG="-workspace ios/Runner.xcworkspace"
           fi
+          xcodebuild $WORKSPACE_FLAG \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/ios_derived \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            PROVISIONING_PROFILE_REQUIRED=NO \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM=""
 
       - name: Package IPA
         run: |
