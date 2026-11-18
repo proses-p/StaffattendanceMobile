@@ -1,8 +1,9 @@
-name: Build iOS IPA
+name: Build iOS Appetize Simulator & IPA
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - '**'
   workflow_dispatch:
 
 jobs:
@@ -25,18 +26,21 @@ jobs:
       - name: Ensure iOS project files exist
         run: flutter create --platforms=ios .
 
-      - name: Prepare Flutter iOS config
-        run: flutter build ios --config-only --release --no-codesign
-
-      - name: Install CocoaPods (if Podfile exists)
-        working-directory: ios
+      - name: Build iOS Simulator App
         run: |
-          if [ -f "Podfile" ]; then
-            pod install
-          fi
+          flutter build ios --simulator --debug
+          rm -rf appetize_stage && mkdir -p appetize_stage
+          cp -R build/ios/iphonesimulator/Runner.app appetize_stage/
 
-      - name: Build Unsigned Runner.app
+      - name: Upload Appetize Simulator App
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runner.app
+          path: appetize_stage/Runner.app
+
+      - name: Build Unsigned Device IPA
         run: |
+          flutter build ios --config-only --release --no-codesign
           WORKSPACE_FLAG="-project ios/Runner.xcodeproj"
           if [ -d "ios/Runner.xcworkspace" ]; then
             WORKSPACE_FLAG="-workspace ios/Runner.xcworkspace"
@@ -52,14 +56,11 @@ jobs:
             PROVISIONING_PROFILE_REQUIRED=NO \
             PROVISIONING_PROFILE_SPECIFIER="" \
             DEVELOPMENT_TEAM=""
-
-      - name: Package IPA
-        run: |
-          mkdir -p Payload
-          cp -r build/ios_derived/Build/Products/Release-iphoneos/Runner.app Payload/
+          rm -rf Payload && mkdir -p Payload
+          cp -R build/ios_derived/Build/Products/Release-iphoneos/Runner.app Payload/
           zip -r -y StaffAttendance.ipa Payload
 
-      - name: Upload IPA Artifact
+      - name: Upload Device IPA
         uses: actions/upload-artifact@v4
         with:
           name: StaffAttendance-IPA
