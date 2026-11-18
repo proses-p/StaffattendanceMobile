@@ -28,7 +28,7 @@ jobs:
 
       - name: Build iOS Simulator App
         run: |
-          flutter build ios --simulator --release 
+          flutter build ios --simulator --debug
           rm -rf appetize_stage && mkdir -p appetize_stage
           cp -R build/ios/iphonesimulator/Runner.app appetize_stage/
 
